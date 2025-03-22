@@ -218,7 +218,10 @@ impl ToResult for cudaError_enum {
             cudaError_enum::CUDA_ERROR_LAUNCH_FAILED => Err(CudaError::LaunchFailed),
             cudaError_enum::CUDA_ERROR_NOT_PERMITTED => Err(CudaError::NotPermitted),
             cudaError_enum::CUDA_ERROR_NOT_SUPPORTED => Err(CudaError::NotSupported),
-            _ => Err(CudaError::UnknownError),
+            other => {
+                println!("{:?}", other);
+                Err(CudaError::UnknownError)
+            },
         }
     }
 }

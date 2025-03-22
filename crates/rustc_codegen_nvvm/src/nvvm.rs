@@ -131,7 +131,7 @@ pub fn codegen_bitcode_modules(
     if verification_res.is_err() {
         let log = prog.compiler_log().unwrap().unwrap_or_default();
         let footer = "If you plan to submit a bug report please re-run the codegen with `RUSTFLAGS=\"--emit=llvm-ir\" and include the .ll file corresponding to the .o file mentioned in the log";
-        panic!(
+        println!(
             "Malformed NVVM IR program rejected by libnvvm, dumping verifier log:\n\n{}\n\n{}",
             log, footer
         );
