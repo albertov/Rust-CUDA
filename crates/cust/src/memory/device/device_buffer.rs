@@ -437,6 +437,7 @@ mod test_device_buffer {
     use super::*;
     use crate::stream::{Stream, StreamFlags};
 
+    #[expect(dead_code)]
     #[derive(Clone, Copy, Debug)]
     struct ZeroSizedType;
     unsafe impl DeviceCopy for ZeroSizedType {}

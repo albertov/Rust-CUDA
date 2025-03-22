@@ -18,17 +18,17 @@ use crate::{
 /// This returns a Result of a kernel invocation object you can then pass to a graph.
 #[macro_export]
 macro_rules! kernel_invocation {
-    ($module:ident . $function:ident <<<$grid:expr, $block:expr, $shared:expr, $stream:ident>>>( $( $arg:expr),* )) => {
+    ($module:ident . $function:ident <<<$grid:expr, $block:expr, $shared:expr, $kernel:ident, $context:ident>>>( $( $arg:expr),* )) => {
         {
             let name = std::ffi::CString::new(stringify!($function)).unwrap();
             let function = $module.get_function(&name);
             match function {
-                Ok(f) => kernel_invocation!(f<<<$grid, $block, $shared, $stream>>>( $($arg),* ) ),
+                Ok(f) => kernel_invocation!(f<<<$grid, $block, $shared, $kernel, $context>>>( $($arg),* ) ),
                 Err(e) => Err(e),
             }
         }
     };
-    ($function:ident <<<$grid:expr, $block:expr, $shared:expr, $stream:ident>>>( $( $arg:expr),* )) => {
+    ($function:ident <<<$grid:expr, $block:expr, $shared:expr, $kernel:ident, $context:ident>>>( $( $arg:expr),* )) => {
         {
             fn assert_impl_devicecopy<T: $crate::memory::DeviceCopy>(_val: T) {}
             if false {
@@ -37,14 +37,18 @@ macro_rules! kernel_invocation {
                 )*
             };
 
-            let boxed = vec![$(&$arg as *const _ as *mut ::std::ffi::c_void),*].into_boxed_slice();
+            let params = vec![$(&$arg as *const _ as *mut ::std::ffi::c_void),*];
+            let params_len = Some(params.len());
 
             Ok($crate::graph::KernelInvocation::_new_internal(
                 $crate::function::BlockSize::from($block),
                 $crate::function::GridSize::from($grid),
                 $shared,
                 $function.to_raw(),
-                vec![].into_boxed_slice(),
+                params.into_boxed_slice(),
+                params_len,
+                $kernel,
+                $context,
             ))
         }
     };
@@ -59,6 +63,8 @@ pub struct KernelInvocation {
     func: cuda::CUfunction,
     params: Box<*mut c_void>,
     params_len: Option<usize>,
+    kernel: cuda::CUkernel,
+    context: cuda::CUcontext,
 }
 
 impl KernelInvocation {
@@ -70,6 +76,8 @@ impl KernelInvocation {
         func: cuda::CUfunction,
         params: Box<*mut c_void>,
         params_len: usize,
+        kernel: cuda::CUkernel,
+        context: cuda::CUcontext,
     ) -> Self {
         Self {
             block_dim,
@@ -78,6 +86,8 @@ impl KernelInvocation {
             func,
             params,
             params_len: Some(params_len),
+            kernel,
+            context,
         }
     }
 
@@ -93,6 +103,8 @@ impl KernelInvocation {
             kernelParams: Box::into_raw(self.params),
             sharedMemBytes: self.shared_mem_bytes,
             extra: ptr::null_mut(),
+            kern: self.kernel,
+            ctx: self.context,
         }
     }
 
@@ -111,6 +123,8 @@ impl KernelInvocation {
             params: Box::from_raw(raw.kernelParams),
             shared_mem_bytes: raw.sharedMemBytes,
             params_len: None,
+            kernel: raw.kern,
+            context: raw.ctx,
         }
     }
 }
@@ -167,6 +181,11 @@ pub enum GraphNodeType {
     MemoryAllocation,
     /// Frees some memory.
     MemoryFree,
+    /// Batch memory operation.
+    BatchMemoryOperation,
+    /// Conditional node.
+    #[cfg(conditional_node)]
+    Conditional,
 }
 
 impl GraphNodeType {
@@ -189,6 +208,11 @@ impl GraphNodeType {
             }
             cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_MEM_ALLOC => GraphNodeType::MemoryAllocation,
             cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_MEM_FREE => GraphNodeType::MemoryFree,
+            cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_BATCH_MEM_OP => {
+                GraphNodeType::BatchMemoryOperation
+            }
+            #[cfg(conditional_node)]
+            cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_CONDITIONAL => GraphNodeType::Conditional,
         }
     }
 
@@ -207,6 +231,9 @@ impl GraphNodeType {
             Self::SemaphoreWait => cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_EXT_SEMAS_WAIT,
             Self::MemoryAllocation => cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_MEM_ALLOC,
             Self::MemoryFree => cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_MEM_FREE,
+            Self::BatchMemoryOperation => cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_BATCH_MEM_OP,
+            #[cfg(conditional_node)]
+            Self::Conditional => cuda::CUgraphNodeType::CU_GRAPH_NODE_TYPE_CONDITIONAL,
         }
     }
 }
@@ -333,15 +360,6 @@ impl Graph {
     /// This dotfile can be turned into an image with graphviz.
     #[cfg(any(windows, unix))]
     pub fn dump_debug_dotfile<P: AsRef<Path>>(&mut self, path: P) -> CudaResult<()> {
-        // not currently present in cuda-driver-sys for some reason
-        extern "C" {
-            fn cuGraphDebugDotPrint(
-                hGraph: cuda::CUgraph,
-                path: *const c_char,
-                flags: c_uint,
-            ) -> cuda::CUresult;
-        }
-
         let path = path.as_ref();
         let mut buf = Vec::new();
         #[cfg(unix)]
@@ -366,7 +384,14 @@ impl Graph {
             );
         }
 
-        unsafe { cuGraphDebugDotPrint(self.raw, "./out.dot\0".as_ptr().cast(), 1 << 0).to_result() }
+        unsafe {
+            cuda::cuGraphDebugDotPrint(
+                self.raw,
+                c"./out.dot".as_ptr(),
+                cuda::CUgraphDebugDot_flags::CU_GRAPH_DEBUG_DOT_FLAGS_VERBOSE as u32,
+            )
+            .to_result()
+        }
     }
 
     /// Adds a kernel invocation node to this graph, [`KernelInvocation`] can be created using
@@ -385,7 +410,7 @@ impl Graph {
             let deps_ptr = deps.as_ptr().cast();
             let mut node = MaybeUninit::<GraphNode>::uninit();
             let params = invocation.to_raw();
-            cuda::cuGraphAddKernelNode(
+            cuda::cuGraphAddKernelNode_v2(
                 node.as_mut_ptr().cast(),
                 self.raw,
                 deps_ptr,
@@ -466,7 +491,7 @@ impl Graph {
         );
         unsafe {
             let mut params = MaybeUninit::uninit();
-            cuda::cuGraphKernelNodeGetParams(node.to_raw(), params.as_mut_ptr());
+            cuda::cuGraphKernelNodeGetParams_v2(node.to_raw(), params.as_mut_ptr());
             Ok(KernelInvocation::from_raw(params.assume_init()))
         }
     }
