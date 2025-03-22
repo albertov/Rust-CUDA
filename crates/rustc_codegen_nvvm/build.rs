@@ -257,6 +257,7 @@ fn rustc_llvm_build() {
         };
         println!("cargo:rustc-link-lib={}={}", kind, name);
     }
+    println!("cargo:rustc-link-lib=dylib=tinfo");
 
     // Link in the system libraries that LLVM depends on
     #[cfg(not(target_os = "windows"))]
