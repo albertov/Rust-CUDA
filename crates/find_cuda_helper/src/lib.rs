@@ -25,7 +25,8 @@ pub fn include_cuda() {
 
 // Returns true if the given path is a valid cuda installation
 fn is_cuda_root_path<P: AsRef<Path>>(path: P) -> bool {
-    path.as_ref().join("include").join("cuda.h").is_file()
+    let p = path.as_ref().join("include").join("cuda.h");
+    p.is_file() || p.read_link().map(|f| f.is_file()).unwrap_or_default()
 }
 
 pub fn find_cuda_root() -> Option<PathBuf> {
@@ -104,9 +105,10 @@ pub fn find_cuda_lib_dirs() -> Vec<PathBuf> {
             }
         };
 
-        let lib_dir = root_path.join("lib").join(lib_path);
+        let lib_dir = root_path.join("lib");
+        println!("lib_dir={:?}", lib_dir);
 
-        return if lib_dir.is_dir() {
+        return if lib_dir.is_dir() || lib_dir.read_link().map(|f| f.is_dir()).unwrap_or_default() {
             vec![lib_dir]
         } else {
             vec![]
@@ -140,6 +142,11 @@ pub fn find_cuda_lib_dirs() -> Vec<PathBuf> {
     let mut valid_paths = vec![];
     for base in &candidates {
         let lib = PathBuf::from(base).join("lib64");
+        if lib.is_dir() {
+            valid_paths.push(lib.clone());
+            valid_paths.push(lib.join("stubs"));
+        }
+        let lib = PathBuf::from(base).join("lib");
         if lib.is_dir() {
             valid_paths.push(lib.clone());
             valid_paths.push(lib.join("stubs"));
