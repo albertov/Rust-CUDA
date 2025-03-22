@@ -354,7 +354,7 @@ impl NvvmProgram {
             sys::nvvmAddModuleToProgram(
                 self.raw,
                 bitcode.as_ptr().cast(),
-                bitcode.len() as u64,
+                bitcode.len(),
                 cstring.as_ptr(),
             )
             .to_result()
@@ -373,7 +373,7 @@ impl NvvmProgram {
             sys::nvvmLazyAddModuleToProgram(
                 self.raw,
                 bitcode.as_ptr().cast(),
-                bitcode.len() as u64,
+                bitcode.len(),
                 cstring.as_ptr(),
             )
             .to_result()
