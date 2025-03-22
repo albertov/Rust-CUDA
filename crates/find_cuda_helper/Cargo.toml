@@ -7,5 +7,5 @@ description = "Helper crate for searching for CUDA libraries"
 repository = "https://github.com/Rust-GPU/Rust-CUDA"
 readme = "../../README.md"
 
-[dependencies]
+[target.'cfg(not(windows))'.dependencies]
 glob = "0.3.0"

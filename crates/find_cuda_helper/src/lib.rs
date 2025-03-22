@@ -16,7 +16,6 @@ pub fn include_cuda() {
         }
 
         println!("cargo:rustc-link-lib=dylib=cuda");
-        println!("cargo:rerun-if-changed=build.rs");
         println!("cargo:rerun-if-env-changed=CUDA_LIBRARY_PATH");
         println!("cargo:rerun-if-env-changed=CUDA_ROOT");
         println!("cargo:rerun-if-env-changed=CUDA_PATH");
@@ -30,10 +29,14 @@ fn is_cuda_root_path<P: AsRef<Path>>(path: P) -> bool {
 }
 
 pub fn find_cuda_root() -> Option<PathBuf> {
+    println!("cargo:rerun-if-env-changed=CUDA_PATH");
+    println!("cargo:rerun-if-env-changed=CUDA_ROOT");
+    println!("cargo:rerun-if-env-changed=CUDA_TOOLKIT_ROOT_DIR");
+
     // search through the common environment variables first
     for path in ["CUDA_PATH", "CUDA_ROOT", "CUDA_TOOLKIT_ROOT_DIR"]
         .iter()
-        .filter_map(|name| std::env::var(*name).ok())
+        .filter_map(|name| env::var(name).ok())
     {
         if is_cuda_root_path(&path) {
             return Some(path.into());
@@ -44,15 +47,21 @@ pub fn find_cuda_root() -> Option<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     let default_paths = ["/usr/lib/cuda", "/usr/local/cuda", "/opt/cuda"];
     #[cfg(target_os = "windows")]
-    let default_paths = ["C:/CUDA"]; // TODO (AL): what's the actual path here?
+    let default_paths = {
+        let base_path = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA";
+        let versions = [
+            "v12.8", "v12.6", "v12.5", "v12.4", "v12.3", "v12.2", "v12.1", "v12.0",
+        ]; // What happened to 12.7 Nvidia?
+        versions
+            .iter()
+            .map(|v| format!(r"{}\{}", base_path, v))
+            .collect::<Vec<_>>()
+    };
 
-    for path in default_paths {
-        if is_cuda_root_path(path) {
-            return Some(path.into());
-        }
-    }
-
-    None
+    default_paths
+        .iter()
+        .find(|path| is_cuda_root_path(path))
+        .map(PathBuf::from)
 }
 
 #[cfg(target_os = "windows")]
@@ -69,7 +78,7 @@ pub fn find_cuda_lib_dirs() -> Vec<PathBuf> {
         // CUDA_PATH matches Windows.
         if target_components[2] != "windows" {
             panic!(
-                "The CUDA_PATH variable is only used by cuda-sys on Windows. Your target is {}.",
+                "The CUDA_PATH variable is only used by cust_raw on Windows. Your target is {}.",
                 target
             );
         }
@@ -88,10 +97,10 @@ pub fn find_cuda_lib_dirs() -> Vec<PathBuf> {
             "i686" => {
                 // lib path would be "Win32" if we support i686. "cublas" is not present in the
                 // 32-bit install.
-                panic!("Rust cuda-sys does not currently support 32-bit Windows.");
+                panic!("Rust cust_raw does not currently support 32-bit Windows.");
             }
             _ => {
-                panic!("Rust cuda-sys only supports the x86_64 Windows architecture.");
+                panic!("Rust cust_raw only supports the x86_64 Windows architecture.");
             }
         };
 
@@ -108,15 +117,10 @@ pub fn find_cuda_lib_dirs() -> Vec<PathBuf> {
 }
 
 pub fn read_env() -> Vec<PathBuf> {
-    if let Ok(path) = env::var("CUDA_LIBRARY_PATH") {
+    if let Some(path) = env::var_os("CUDA_LIBRARY_PATH") {
         // The location of the libcuda, libcudart, and libcublas can be hardcoded with the
         // CUDA_LIBRARY_PATH environment variable.
-        let split_char = if cfg!(target_os = "windows") {
-            ";"
-        } else {
-            ":"
-        };
-        path.split(split_char).map(PathBuf::from).collect()
+        env::split_paths(&path).collect()
     } else {
         vec![]
     }
