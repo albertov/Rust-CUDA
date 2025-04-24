@@ -306,7 +306,7 @@ impl Stream {
         let grid_size: GridSize = grid_size.into();
         let block_size: BlockSize = block_size.into();
 
-        cuda::cuLaunchCooperativeKernel(
+        driver_sys::cuLaunchCooperativeKernel(
             func.to_raw(),
             grid_size.x,
             grid_size.y,
