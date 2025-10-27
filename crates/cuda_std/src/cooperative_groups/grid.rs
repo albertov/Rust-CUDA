@@ -139,11 +139,12 @@
 //! - **Deadlock**: If not all threads call `sync()`
 //! - **Undefined behavior**: If kernel not cooperatively launched
 //!
-//! # Phase 5 Note
+//! # Workspace Mechanism
 //!
-//! The current implementation uses a placeholder workspace pointer (null).
-//! Phase 5 will investigate proper workspace allocation via the CUDA driver.
-//! For now, `is_valid()` returns `false` to indicate incomplete integration.
+//! The workspace pointer is automatically provided by the CUDA driver via
+//! environment registers (envreg1 and envreg2) during cooperative kernel launch.
+//! The driver allocates a small workspace structure containing a barrier counter
+//! used for grid-wide synchronization.
 
 use core::marker::PhantomData;
 
@@ -198,17 +199,11 @@ pub struct GridGroup<'a> {
     /// Workspace pointer for barrier coordination.
     ///
     /// This pointer is used by the grid synchronization intrinsics to coordinate
-    /// arrival counts across blocks. It must point to device-accessible memory
-    /// (device or managed memory).
+    /// arrival counts across blocks. It points to a GridWorkspace structure
+    /// allocated by the CUDA driver during cooperative kernel launch.
     ///
-    /// # Phase 5 TODO
-    ///
-    /// Currently set to null pointer. Phase 5 will investigate how to properly
-    /// allocate and obtain this pointer via the CUDA driver API. The allocation
-    /// mechanism may involve:
-    /// - Driver-provided workspace during cooperative launch
-    /// - Explicit allocation in kernel arguments
-    /// - Special query function to retrieve kernel workspace
+    /// The driver automatically loads this pointer into environment registers
+    /// (envreg1 for high 32 bits, envreg2 for low 32 bits) before kernel execution.
     workspace: *mut u32,
 
     /// Phantom data to tie lifetime to kernel scope.
@@ -252,16 +247,30 @@ pub struct GridGroup<'a> {
 /// );
 /// ```
 ///
+/// **Host code (Rust with cust example)**:
+/// ```no_run
+/// use cust::prelude::*;
+///
+/// // Launch cooperatively
+/// stream.launch_cooperative(
+///     &module.get_function("my_kernel")?,
+///     grid_dim,
+///     block_dim,
+///     shared_mem_bytes,
+///     &kernel_args,
+/// )?;
+/// ```
+///
 /// # Returns
 ///
 /// A `GridGroup<'static>` handle tied to the kernel's execution. The `'static`
 /// lifetime indicates the handle is valid for the entire kernel execution.
 ///
-/// # Phase 5 Note
+/// # Safety
 ///
-/// The current implementation returns a grid group with a null workspace pointer.
-/// This means `is_valid()` will return `false` and `sync()` will not function
-/// correctly. Phase 5 will implement proper workspace allocation.
+/// The workspace pointer is automatically provided by the CUDA driver via
+/// environment registers. If the kernel was not launched cooperatively,
+/// the workspace pointer will be null and `is_valid()` will return false.
 ///
 /// # Example
 ///
@@ -272,33 +281,28 @@ pub struct GridGroup<'a> {
 /// pub unsafe fn my_kernel(data: *mut f32) {
 ///     let grid = this_grid();
 ///
+///     if !grid.is_valid() {
+///         // Handle non-cooperative launch
+///         return;
+///     }
+///
 ///     // Use grid handle for synchronization
+///     process_local_data(data);
 ///     grid.sync();
+///     update_global_state(data);
 /// }
 /// ```
 #[inline(always)]
 pub fn this_grid() -> GridGroup<'static> {
-    // Phase 5 TODO: Investigate proper workspace pointer allocation
-    //
-    // Options to explore:
-    // 1. Driver provides workspace pointer during cooperative launch
-    // 2. Workspace passed as kernel argument
-    // 3. Query function to retrieve current kernel's workspace
-    // 4. Static allocation in device memory (if safe for multi-kernel scenarios)
-    //
-    // For now, use null pointer with documentation that Phase 5 is required
-    let workspace = core::ptr::null_mut();
-
-    // Future: Add runtime check for cooperative launch if detection available
-    // This would provide better error messages than silent null pointer
-    //
-    // if workspace.is_null() {
-    //     // Device-side panic or error indication
-    //     panic!("GridGroup requires cooperative kernel launch");
-    // }
+    // SAFETY: Reading environment registers is safe in device code.
+    // The driver sets these during cooperative launch.
+    let workspace = unsafe {
+        use super::intrinsics::get_grid_workspace;
+        get_grid_workspace()
+    };
 
     GridGroup {
-        workspace,
+        workspace: workspace as *mut u32, // Cast to u32 for barrier field access
         _marker: PhantomData,
     }
 }
@@ -561,17 +565,12 @@ impl<'a> GridGroup<'a> {
     /// - `true`: Grid group is valid, `sync()` should work
     /// - `false`: Grid group is invalid, `sync()` will not work correctly
     ///
-    /// # Current Implementation
+    /// # Implementation
     ///
-    /// Checks if the workspace pointer is non-null. This is a minimal validation.
-    /// Phase 5 may add more sophisticated checks (e.g., magic values in workspace,
-    /// driver queries).
-    ///
-    /// # Phase 5 Note
-    ///
-    /// Currently always returns `false` because `this_grid()` uses a null
-    /// workspace pointer. Phase 5 will implement proper workspace allocation,
-    /// after which this method will return meaningful results.
+    /// Checks if the workspace pointer is non-null. The workspace pointer is
+    /// read from environment registers (envreg1, envreg2) which are set by the
+    /// CUDA driver during cooperative kernel launch. If the kernel was launched
+    /// normally (not cooperatively), these registers contain null.
     ///
     /// # Example
     ///
@@ -593,11 +592,9 @@ impl<'a> GridGroup<'a> {
     /// ```
     #[inline(always)]
     pub fn is_valid(&self) -> bool {
-        // Simple null check for now
-        // Phase 5 may add:
-        // - Magic value validation in workspace
-        // - Driver query for cooperative launch status
-        // - Workspace size/alignment checks
+        // Check if workspace pointer is non-null
+        // The driver sets this to a valid pointer during cooperative launch
+        // and leaves it null for normal launches
         !self.workspace.is_null()
     }
 }

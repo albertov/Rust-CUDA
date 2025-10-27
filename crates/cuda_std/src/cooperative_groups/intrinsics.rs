@@ -24,7 +24,86 @@
 //! - CUDA Programming Guide: Appendix on Cooperative Groups
 
 use crate::gpu_only;
-use core::arch::asm;
+
+/// Grid workspace structure allocated by the CUDA driver.
+///
+/// This structure is automatically allocated when using `cudaLaunchCooperativeKernel`
+/// and its address is passed to the kernel via environment registers.
+///
+/// # Layout
+/// - `ws_size`: Workspace size in bytes (for validation)
+/// - `barrier`: Atomic counter for grid-wide synchronization
+///
+/// # Note
+/// This structure is internal and should not be directly accessed by users.
+/// Use `GridGroup::sync()` instead.
+#[repr(C)]
+pub struct GridWorkspace {
+    pub ws_size: u32,
+    pub barrier: u32,
+}
+
+/// Reads a 64-bit value from device environment registers.
+///
+/// Environment registers are special hardware registers that the CUDA driver
+/// uses to pass implicit parameters to kernels. For cooperative kernels,
+/// registers 1 and 2 contain the grid workspace pointer.
+///
+/// # Parameters
+/// - `REG_HIGH`: Environment register number for high 32 bits (typically 1)
+/// - `REG_LOW`: Environment register number for low 32 bits (typically 2)
+///
+/// # Returns
+/// 64-bit value composed from the two environment registers
+///
+/// # Safety
+/// This function reads from hardware registers. It is only valid when called
+/// from within a cooperatively-launched kernel.
+#[gpu_only]
+#[inline(always)]
+unsafe fn load_env_reg64<const REG_HIGH: u32, const REG_LOW: u32>() -> u64 {
+    use core::arch::asm;
+
+    let high: u32;
+    let low: u32;
+
+    // Read high 32 bits from envreg<REG_HIGH>
+    asm!(
+        "mov.u32 {reg}, %envreg{num};",
+        reg = out(reg32) high,
+        num = const REG_HIGH,
+        options(nostack, preserves_flags)
+    );
+
+    // Read low 32 bits from envreg<REG_LOW>
+    asm!(
+        "mov.u32 {reg}, %envreg{num};",
+        reg = out(reg32) low,
+        num = const REG_LOW,
+        options(nostack, preserves_flags)
+    );
+
+    // Combine into 64-bit value
+    ((high as u64) << 32) | (low as u64)
+}
+
+/// Gets the grid workspace pointer from environment registers.
+///
+/// The CUDA driver automatically loads the workspace address into
+/// environment registers 1 and 2 during cooperative kernel launch.
+///
+/// # Returns
+/// Pointer to the grid workspace structure, or null if not cooperatively launched
+///
+/// # Safety
+/// This function is only safe when called from within a cooperatively-launched kernel.
+#[gpu_only]
+#[inline(always)]
+pub unsafe fn get_grid_workspace() -> *mut GridWorkspace {
+    // NVIDIA uses envreg1 for high 32 bits, envreg2 for low 32 bits
+    let addr = load_env_reg64::<1, 2>();
+    addr as *mut GridWorkspace
+}
 
 /// Checks if the current thread is the master thread of its CTA (Cooperative Thread Array/block).
 ///
