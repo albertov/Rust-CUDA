@@ -259,8 +259,9 @@ pub unsafe fn sync_grids_arrive(arrived: *mut u32) -> u32 {
 /// - Single load operation, more efficient
 ///
 /// **SM 6.0-6.9 (Pascal, Volta pre-7.0)**:
-/// - Uses volatile load followed by `fence.sc.gpu`
-/// - Fence ensures memory ordering after load
+/// - Uses `ld.acquire.gpu.u32` followed by `fence.sc.gpu`
+/// - Acquire load ensures cache coherency across SMs
+/// - Fence provides additional memory ordering after barrier flip
 /// - Two-instruction sequence for compatibility
 ///
 /// # Parameters
@@ -305,14 +306,15 @@ pub unsafe fn sync_grids_wait(old_arrive: u32, arrived: *const u32) {
 
         #[cfg(not(target_arch_sm = "sm_70"))]
         {
-            // SM 6.0-6.9: Use volatile load + fence
-            // PTX: ld.volatile.u32 followed by fence.sc.gpu
+            // SM 6.0-6.9: Use acquire load + fence
+            // PTX: ld.acquire.gpu.u32 followed by fence.sc.gpu
             //
-            // Volatile load prevents compiler reordering, fence provides ordering.
-            use crate::atomic::intrinsics::{atomic_load_volatile_32_device, fence_sc_device};
+            // Acquire load ensures cache coherency across SMs (prevents spinning on stale L1 cache).
+            // Additional fence after loop provides extra memory ordering guarantee.
+            use crate::atomic::intrinsics::{atomic_load_acquire_32_device, fence_sc_device};
 
             loop {
-                let current_arrive = atomic_load_volatile_32_device(arrived);
+                let current_arrive = atomic_load_acquire_32_device(arrived);
 
                 if bar_has_flipped(old_arrive, current_arrive) {
                     break;
