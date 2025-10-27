@@ -422,6 +422,10 @@ impl<'a> GridGroup<'a> {
         use crate::thread::sync_threads;
         use super::intrinsics::{sync_grids_arrive, sync_grids_wait, is_cta_master};
 
+        // Critical: Validate workspace pointer before use
+        // Without this, undefined behavior occurs if kernel not cooperatively launched
+        assert!(self.is_valid(), "GridGroup::sync() requires cooperative kernel launch via cudaLaunchCooperativeKernel");
+
         // Step 1: Block-level sync ensures all threads in block are ready
         // This prevents races between threads in the same block
         sync_threads();
