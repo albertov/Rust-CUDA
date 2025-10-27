@@ -23,15 +23,36 @@
 //! - **Minimum**: SM 6.0 (Pascal) for grid synchronization
 //! - **Recommended**: SM 7.0+ (Volta+) for efficient acquire/release atomics
 //!
-//! # Safety
+//! # Usage Patterns
 //!
-//! Grid synchronization primitives are `unsafe` because they impose strict requirements:
-//! - Must use cooperative kernel launch
-//! - All participating blocks must reach the sync point
-//! - Memory ordering must be correctly managed
-//! - Deadlock possible if used incorrectly
+//! ## High-Level API (Recommended)
 //!
-//! # Example (Conceptual)
+//! Use the `GridGroup` type for safe, ergonomic grid synchronization:
+//!
+//! ```no_run
+//! use cuda_std::cooperative_groups::*;
+//!
+//! #[kernel]
+//! pub unsafe fn iterative_solver(data: *mut f32) {
+//!     let grid = this_grid();
+//!
+//!     for iteration in 0..MAX_ITERS {
+//!         // Phase 1: local computation
+//!         process_local_data(data);
+//!
+//!         // Sync all blocks before global phase
+//!         grid.sync();
+//!
+//!         // Phase 2: global computation with consistent view
+//!         update_global_state(data);
+//!         grid.sync();
+//!     }
+//! }
+//! ```
+//!
+//! ## Low-Level API (Advanced)
+//!
+//! Use the `intrinsics` module for direct control over synchronization primitives:
 //!
 //! ```ignore
 //! use cuda_std::cooperative_groups::intrinsics::{sync_grids_arrive, sync_grids_wait};
@@ -49,5 +70,21 @@
 //!     let neighbor_data = *data.add((thread::index() + 1) % total_threads);
 //! }
 //! ```
+//!
+//! # Safety
+//!
+//! Grid synchronization has strict requirements:
+//! - Must use cooperative kernel launch (`cudaLaunchCooperativeKernel`)
+//! - All threads in all blocks must participate uniformly in sync operations
+//! - Memory ordering must be correctly managed
+//! - Deadlock possible if used incorrectly (divergent sync calls)
+//!
+//! The high-level `GridGroup` API encapsulates unsafe operations, providing
+//! a safer interface. However, incorrect usage patterns (e.g., divergent sync
+//! calls) can still cause deadlock.
 
 pub mod intrinsics;
+pub mod grid;
+
+// Re-export public API for convenience
+pub use grid::{GridGroup, this_grid};
