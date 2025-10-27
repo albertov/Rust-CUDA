@@ -43,6 +43,8 @@ pub mod misc;
 // WIP
 // pub mod rt;
 pub mod atomic;
+pub mod cfg;
+pub mod cooperative_groups;
 pub mod ptr;
 pub mod shared;
 pub mod thread;
