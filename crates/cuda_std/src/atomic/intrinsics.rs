@@ -70,7 +70,7 @@ macro_rules! load {
                 pub unsafe fn [<atomic_load_ $ordering _ $width _ $scope>](ptr: *const [<u $width>]) -> [<u $width>] {
                     let mut out;
                     asm!(
-                        concat!("ld.", stringify!($ordering), load_scope!($ordering, $scope), ".", stringify!([<u $width>]), " {}, [{}];"),
+                        concat!("ld.", stringify!($ordering), load_scope!($ordering, $scope_asm), ".", stringify!([<u $width>]), " {}, [{}];"),
                         out([<reg $width>]) out,
                         in(reg64) ptr
                     );
