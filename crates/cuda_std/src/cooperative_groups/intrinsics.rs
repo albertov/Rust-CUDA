@@ -39,8 +39,8 @@ use crate::gpu_only;
 /// Use `GridGroup::sync()` instead.
 #[repr(C)]
 pub struct GridWorkspace {
-    pub ws_size: u32,
-    pub barrier: u32,
+    ws_size: u32,
+    barrier: u32,
 }
 
 /// Reads a 64-bit value from device environment registers.

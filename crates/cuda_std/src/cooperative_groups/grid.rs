@@ -175,6 +175,17 @@ use core::marker::PhantomData;
 /// - SM 6.0+ GPU (Pascal or newer)
 /// - All threads must participate uniformly in sync operations
 ///
+/// # Implementation Details
+///
+/// The `workspace` field stores a pointer directly to the barrier field (u32) within
+/// the driver-allocated GridWorkspace structure, rather than a pointer to the full
+/// GridWorkspace. This design choice eliminates field offset calculations in
+/// performance-critical sync operations.
+///
+/// The workspace pointer is obtained from environment registers `%envreg1` and `%envreg2`,
+/// which the CUDA driver sets during cooperative kernel launch. This approach matches
+/// NVIDIA's internal implementation.
+///
 /// # Example
 ///
 /// ```no_run
@@ -196,22 +207,13 @@ use core::marker::PhantomData;
 /// }
 /// ```
 pub struct GridGroup<'a> {
-    /// Workspace pointer for barrier coordination.
+    /// Pointer to barrier field (u32) within driver-allocated GridWorkspace.
     ///
-    /// This pointer is used by the grid synchronization intrinsics to coordinate
-    /// arrival counts across blocks. It points to a GridWorkspace structure
-    /// allocated by the CUDA driver during cooperative kernel launch.
-    ///
-    /// The driver automatically loads this pointer into environment registers
-    /// (envreg1 for high 32 bits, envreg2 for low 32 bits) before kernel execution.
+    /// Stored as `*mut u32` for direct use in intrinsics without field offset overhead.
+    /// The pointer is valid only for cooperatively-launched kernels and is null otherwise.
     workspace: *mut u32,
 
-    /// Phantom data to tie lifetime to kernel scope.
-    ///
-    /// Prevents `GridGroup` from escaping the kernel, ensuring it's only used
-    /// during valid kernel execution. The lifetime is typically `'static` since
-    /// `this_grid()` returns `GridGroup<'static>`, but the type parameter allows
-    /// for future flexibility.
+    /// Phantom lifetime marker ensuring GridGroup cannot outlive the kernel invocation.
     _marker: PhantomData<&'a ()>,
 }
 
@@ -220,6 +222,22 @@ pub struct GridGroup<'a> {
 /// This function constructs a `GridGroup` representing all threads across all
 /// blocks in the executing kernel. The returned handle can be used to perform
 /// grid-wide synchronization via the `sync()` method.
+///
+/// # Environment Register Approach
+///
+/// ⚠️ **Important**: This function reads the grid workspace pointer from NVIDIA
+/// environment registers (`%envreg1`, `%envreg2`). While this matches NVIDIA's
+/// internal implementation, it is not officially documented behavior.
+///
+/// **Validation Recommended**: Test on your specific CUDA version and GPU before
+/// production use. Validated configurations:
+/// - CUDA 12.4.99 on SM_60, SM_70, SM_80, SM_89
+///
+/// # Cooperative Launch Requirement
+///
+/// This function will return an invalid GridGroup (with null workspace) if the
+/// kernel was not launched cooperatively. Always check with [`is_valid()`](GridGroup::is_valid)
+/// or rely on [`sync()`](GridGroup::sync) to panic on invalid state.
 ///
 /// # Requirements
 ///

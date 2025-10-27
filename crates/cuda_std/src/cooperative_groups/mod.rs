@@ -71,6 +71,39 @@
 //! }
 //! ```
 //!
+//! # Implementation Notes
+//!
+//! ## Workspace Allocation via Environment Registers
+//!
+//! Grid synchronization requires a driver-allocated workspace containing barrier state.
+//! Unlike the official CUDA C++ API which uses opaque runtime integration, this Rust
+//! implementation accesses the workspace pointer via NVIDIA's environment registers:
+//!
+//! - `%envreg1`: High 32 bits of workspace pointer
+//! - `%envreg2`: Low 32 bits of workspace pointer
+//!
+//! This approach was discovered through analysis of NVIDIA's cooperative_groups implementation
+//! in CUDA 12.4.99. While not officially documented, it matches NVIDIA's internal mechanism
+//! and has been validated on:
+//!
+//! - CUDA 12.4.99
+//! - SM architectures: 60, 70, 80, 89
+//! - GPUs: RTX 4090
+//!
+//! ## Compatibility and Validation
+//!
+//! **Important**: This implementation relies on undocumented NVIDIA driver behavior.
+//! Users should validate the environment register approach works on their specific
+//! CUDA version and GPU architecture before production deployment.
+//!
+//! If the workspace pointer is null (non-cooperative launch), [`GridGroup::is_valid()`]
+//! returns false and [`GridGroup::sync()`] will panic with a clear error message.
+//!
+//! ## Testing
+//!
+//! Reference C++ tests using official `cooperative_groups` API are provided in
+//! `tests/cuda_std_cg_tests/cpp_reference/` and demonstrate identical behavior.
+//!
 //! # Safety
 //!
 //! Grid synchronization has strict requirements:
