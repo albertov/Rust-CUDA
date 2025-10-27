@@ -22,7 +22,7 @@ pub unsafe fn membar_system() {
 
 #[gpu_only]
 pub unsafe fn fence_sc_device() {
-    asm!("fence.sc.gl;");
+    asm!("fence.sc.gpu;");
 }
 
 #[gpu_only]
@@ -37,7 +37,7 @@ pub unsafe fn fence_sc_system() {
 
 #[gpu_only]
 pub unsafe fn fence_acqrel_device() {
-    asm!("fence.acq_rel.gl;");
+    asm!("fence.acq_rel.gpu;");
 }
 
 #[gpu_only]
