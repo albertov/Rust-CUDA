@@ -361,15 +361,21 @@ impl<'a> GridGroup<'a> {
     /// Thread B calls sync() → Thread B reads X (sees A's write)
     /// ```
     ///
+    /// **Critical**: A memory fence is executed at the start of `sync()` to ensure
+    /// all writes before the barrier are visible across blocks. Without this fence,
+    /// plain (non-atomic) stores before `sync()` may not be visible to other blocks,
+    /// causing incorrect results or deadlock.
+    ///
     /// # Implementation
     ///
     /// The sync algorithm follows NVIDIA's pattern:
     ///
-    /// 1. **Block sync**: All threads in each block synchronize (`sync_threads()`)
-    /// 2. **Arrive**: CTA master thread increments global arrival counter
-    /// 3. **Block sync**: Threads wait for arrival to complete
-    /// 4. **Wait**: Threads wait for barrier flip (all blocks arrived)
-    /// 5. **Block sync**: Final sync ensures memory visibility
+    /// 1. **Memory fence**: Ensures all writes before `sync()` are visible across blocks
+    /// 2. **Block sync**: All threads in each block synchronize (`sync_threads()`)
+    /// 3. **Arrive**: CTA master thread increments global arrival counter
+    /// 4. **Block sync**: Threads wait for arrival to complete
+    /// 5. **Wait**: Threads wait for barrier flip (all blocks arrived)
+    /// 6. **Block sync**: Final sync ensures memory visibility
     ///
     /// # Deadlock Prevention
     ///
@@ -439,10 +445,35 @@ impl<'a> GridGroup<'a> {
     pub fn sync(&self) {
         use crate::thread::sync_threads;
         use super::intrinsics::{sync_grids_arrive, sync_grids_wait, is_cta_master};
+        use crate::atomic::intrinsics::{fence_sc_device, membar_device};
 
         // Critical: Validate workspace pointer before use
         // Without this, undefined behavior occurs if kernel not cooperatively launched
         assert!(self.is_valid(), "GridGroup::sync() requires cooperative kernel launch via cudaLaunchCooperativeKernel");
+
+        // Step 0: CRITICAL memory barrier + fence BEFORE synchronization barrier
+        //
+        // membar.gl: Flushes pending writes from L1 cache to global memory (L2/DRAM).
+        // This makes plain stores visible to other streaming multiprocessors.
+        // Without membar, plain stores may remain in local L1 cache indefinitely.
+        //
+        // fence.sc.gpu: Establishes sequential consistency ordering for memory operations.
+        // Constrains the order of atomic operations relative to the barrier.
+        //
+        // Per PTX ISA documentation:
+        // - fence: Orders memory operations but does NOT force cache writebacks
+        // - membar: Forces pending writes to be visible at the specified level (gl = global)
+        //
+        // Both are required:
+        // 1. membar.gl flushes L1 writes to make them visible across SMs
+        // 2. fence.sc.gpu ensures proper ordering of subsequent atomic operations
+        //
+        // SAFETY: Both operations are safe to call at any time. They only affect
+        // memory visibility and ordering, not correctness of individual operations.
+        unsafe {
+            membar_device();   // Flush L1 writes to global memory
+            fence_sc_device(); // Establish memory ordering for atomics
+        }
 
         // Step 1: Block-level sync ensures all threads in block are ready
         // This prevents races between threads in the same block
@@ -458,10 +489,10 @@ impl<'a> GridGroup<'a> {
             0
         };
 
-        // Step 3: Block-level sync to share the arrival state
-        // Ensures the old_arrive value is visible to all threads in the block
-        // (Though in practice, only the CTA master's value matters)
-        sync_threads();
+        // Step 3: Removed - the sync_threads() here caused deadlock because only
+        // the CTA master reaches this code path after the if/else, but sync_threads()
+        // requires ALL threads in the block. The old_arrive value only matters for
+        // the CTA master in the wait intrinsic, so no sync is needed here.
 
         // Step 4: Wait for the grid barrier to flip
         // All threads wait, though the intrinsic only polls in the CTA master
