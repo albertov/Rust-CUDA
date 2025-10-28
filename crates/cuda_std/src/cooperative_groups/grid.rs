@@ -499,9 +499,10 @@ impl<'a> GridGroup<'a> {
         // This ensures uniform control flow across the block
         unsafe { sync_grids_wait(old_arrive, self.workspace) };
 
-        // Step 5: Block-level sync after barrier ensures memory visibility
-        // Guarantees that all memory writes from other blocks are visible
-        sync_threads();
+        // Step 5: Removed - sync_threads() here is redundant because sync_grids_wait()
+        // already performs sync_threads() at its end (intrinsics.rs:299), ensuring both
+        // uniform control flow and memory visibility. Adding another sync here creates
+        // double synchronization which is wasteful and can cause timing issues.
     }
 
     /// Returns the total number of threads in the grid.
