@@ -320,7 +320,10 @@ pub fn this_grid() -> GridGroup<'static> {
     };
 
     GridGroup {
-        workspace: workspace as *mut u32, // Cast to u32 for barrier field access
+        // Cast workspace pointer to *mut u32, then offset to barrier field
+        // GridWorkspace layout: [ws_size: u32, barrier: u32]
+        // The sync intrinsics expect a pointer to the barrier field (+4 bytes from base)
+        workspace: unsafe { (workspace as *mut u32).offset(1) },
         _marker: PhantomData,
     }
 }
@@ -443,66 +446,84 @@ impl<'a> GridGroup<'a> {
     /// ```
     #[inline(always)]
     pub fn sync(&self) {
-        use crate::thread::sync_threads;
-        use super::intrinsics::{sync_grids_arrive, sync_grids_wait, is_cta_master};
-        use crate::atomic::intrinsics::{fence_sc_device, membar_device};
+        // Implementation of grid-wide synchronization using bit-31 flip detection.
+        //
+        // This implements the EXACT algorithm from NVIDIA's cooperative_groups C++ headers:
+        // cooperative_groups/details/sync.h - grid_group::sync()
+        //
+        // Algorithm:
+        // 1. Master block (block 0) adds flip value: 0x80000000 - (num_blocks - 1)
+        // 2. Non-master blocks add 1
+        // 3. All threads poll workspace until bit 31 flips (expected XOR current)
+        //
+        // The flip value ensures that when all blocks arrive, bit 31 toggles:
+        // - Start: counter at some value with bit 31 = X
+        // - After all blocks: counter += sum_of_all_increments
+        // - sum_of_all_increments = flip + (num_blocks - 1) * 1 = 0x80000000
+        // - Result: bit 31 = !X (flipped)
+        //
+        // Memory ordering:
+        // - Uses atom.add.release.gpu.u32 and ld.acquire.gpu.u32 (SM 7.0+ instructions)
+        // - cuda_std targets SM 7.0+ (Compute70), so release/acquire semantics are always available
+        //
+        // SAFETY: Requires cooperative kernel launch and uniform participation
 
-        // Critical: Validate workspace pointer before use
-        // Without this, undefined behavior occurs if kernel not cooperatively launched
-        assert!(self.is_valid(), "GridGroup::sync() requires cooperative kernel launch via cudaLaunchCooperativeKernel");
-
-        // Step 0: CRITICAL memory barrier + fence BEFORE synchronization barrier
-        //
-        // membar.gl: Flushes pending writes from L1 cache to global memory (L2/DRAM).
-        // This makes plain stores visible to other streaming multiprocessors.
-        // Without membar, plain stores may remain in local L1 cache indefinitely.
-        //
-        // fence.sc.gpu: Establishes sequential consistency ordering for memory operations.
-        // Constrains the order of atomic operations relative to the barrier.
-        //
-        // Per PTX ISA documentation:
-        // - fence: Orders memory operations but does NOT force cache writebacks
-        // - membar: Forces pending writes to be visible at the specified level (gl = global)
-        //
-        // Both are required:
-        // 1. membar.gl flushes L1 writes to make them visible across SMs
-        // 2. fence.sc.gpu ensures proper ordering of subsequent atomic operations
-        //
-        // SAFETY: Both operations are safe to call at any time. They only affect
-        // memory visibility and ordering, not correctness of individual operations.
         unsafe {
-            membar_device();   // Flush L1 writes to global memory
-            fence_sc_device(); // Establish memory ordering for atomics
+            use super::intrinsics::is_cta_master;
+            use core::arch::asm;
+            use crate::thread::sync_threads;
+
+            let workspace = self.workspace as u64;
+            let mut old_arrive: u32 = 0;
+
+            // Step 1: Block-level synchronization first
+            sync_threads();
+
+            // Step 2: CTA master (thread 0,0,0 of each block) atomically increments
+            if is_cta_master() {
+                // Calculate number of blocks in grid
+                let grid = crate::thread::grid_dim();
+                let num_blocks = grid.x * grid.y * grid.z;
+
+                // GPU master (block 0,0,0) uses flip value, other blocks add 1
+                let nb = if self.is_master() {
+                    0x80000000u32 - (num_blocks - 1)
+                } else {
+                    1u32
+                };
+
+                // Atomic add with release semantics (SM 7.0+)
+                asm!(
+                    "atom.add.release.gpu.u32 {result}, [{workspace}], {value};",
+                    result = out(reg32) old_arrive,
+                    workspace = in(reg64) workspace,
+                    value = in(reg32) nb,
+                    options(nostack)
+                );
+            }
+
+            // Step 3: Wait for barrier flip (only CTA masters poll)
+            if is_cta_master() {
+                let mut current_arrive: u32;
+                loop {
+                    asm!(
+                        "ld.acquire.gpu.u32 {result}, [{workspace}];",
+                        result = out(reg32) current_arrive,
+                        workspace = in(reg64) workspace,
+                        options(nostack, readonly)
+                    );
+
+                    // Check if bit 31 flipped
+                    let has_flipped = ((old_arrive ^ current_arrive) & 0x80000000u32) != 0;
+                    if has_flipped {
+                        break;
+                    }
+                }
+            }
+
+            // Step 4: Block-level sync to ensure all threads wait
+            sync_threads();
         }
-
-        // Step 1: Block-level sync ensures all threads in block are ready
-        // This prevents races between threads in the same block
-        sync_threads();
-
-        // Step 2: One thread per block arrives at the grid barrier
-        // The CTA master atomically increments the global arrival counter
-        // Non-master threads don't participate in arrival
-        let old_arrive = if is_cta_master() {
-            unsafe { sync_grids_arrive(self.workspace) }
-        } else {
-            // Non-master threads return dummy value (not used in wait)
-            0
-        };
-
-        // Step 3: Removed - the sync_threads() here caused deadlock because only
-        // the CTA master reaches this code path after the if/else, but sync_threads()
-        // requires ALL threads in the block. The old_arrive value only matters for
-        // the CTA master in the wait intrinsic, so no sync is needed here.
-
-        // Step 4: Wait for the grid barrier to flip
-        // All threads wait, though the intrinsic only polls in the CTA master
-        // This ensures uniform control flow across the block
-        unsafe { sync_grids_wait(old_arrive, self.workspace) };
-
-        // Step 5: Removed - sync_threads() here is redundant because sync_grids_wait()
-        // already performs sync_threads() at its end (intrinsics.rs:299), ensuring both
-        // uniform control flow and memory visibility. Adding another sync here creates
-        // double synchronization which is wasteful and can cause timing issues.
     }
 
     /// Returns the total number of threads in the grid.
@@ -650,6 +671,37 @@ impl<'a> GridGroup<'a> {
         // The driver sets this to a valid pointer during cooperative launch
         // and leaves it null for normal launches
         !self.workspace.is_null()
+    }
+
+    /// Checks if the current block is the master block (block 0 in the grid).
+    ///
+    /// The master block is defined as the block with indices (0, 0, 0) within
+    /// the grid. In the grid synchronization algorithm, the master block adds
+    /// a special flip value while non-master blocks add 1.
+    ///
+    /// # Returns
+    ///
+    /// `true` if this is block (0,0,0) in the grid, `false` otherwise.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use cuda_std::cooperative_groups::*;
+    ///
+    /// #[kernel]
+    /// pub unsafe fn example() {
+    ///     let grid = this_grid();
+    ///
+    ///     if grid.is_master() {
+    ///         // Master block: initialize shared state
+    ///     }
+    /// }
+    /// ```
+    #[inline(always)]
+    fn is_master(&self) -> bool {
+        use crate::thread::block_idx;
+        let block = block_idx();
+        block.x == 0 && block.y == 0 && block.z == 0
     }
 }
 
