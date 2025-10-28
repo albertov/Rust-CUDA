@@ -471,13 +471,21 @@ impl<'a> GridGroup<'a> {
         unsafe {
             use super::intrinsics::is_cta_master;
             use core::arch::asm;
-            use crate::thread::sync_threads;
+            use crate::thread::block_dim;
 
             let workspace = self.workspace as u64;
             let mut old_arrive: u32 = 0;
 
-            // Step 1: Block-level synchronization first
-            sync_threads();
+            // Calculate threads per block for barrier
+            let block = block_dim();
+            let threads_per_block = block.x * block.y * block.z;
+
+            // Step 1: Block-level synchronization first (using barrier 0 for consistency)
+            asm!(
+                "bar.sync 0, {};",
+                in(reg32) threads_per_block,
+                options(nostack)
+            );
 
             // Step 2: CTA master (thread 0,0,0 of each block) atomically increments
             if is_cta_master() {
@@ -521,8 +529,12 @@ impl<'a> GridGroup<'a> {
                 }
             }
 
-            // Step 4: Block-level sync to ensure all threads wait
-            sync_threads();
+            // Step 4: Block-level sync to ensure all threads wait (using barrier 0 for consistency)
+            asm!(
+                "bar.sync 0, {};",
+                in(reg32) threads_per_block,
+                options(nostack)
+            );
         }
     }
 
