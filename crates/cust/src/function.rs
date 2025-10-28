@@ -6,7 +6,8 @@ use std::mem::{MaybeUninit, transmute};
 use cust_raw::driver_sys;
 use cust_raw::driver_sys::CUfunction;
 
-use crate::context::{CacheConfig, SharedMemoryConfig};
+use crate::context::{CacheConfig, CurrentContext, SharedMemoryConfig};
+use crate::device::DeviceAttribute;
 use crate::error::{CudaResult, ToResult};
 use crate::module::Module;
 
@@ -469,6 +470,74 @@ impl Function<'_> {
                 block_size.assume_init() as u32,
             ))
         }
+    }
+
+    /// Checks kernel occupancy and calculates the maximum cooperative grid size.
+    ///
+    /// This method validates that the kernel can achieve non-zero occupancy with the given
+    /// launch configuration and computes the maximum number of blocks that can participate
+    /// in a cooperative launch.
+    ///
+    /// # Parameters
+    ///
+    /// * `block_size` - The dimensions of the thread block
+    /// * `dynamic_smem_size` - Amount of dynamic shared memory in bytes
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok((blocks_per_sm, max_blocks))` where:
+    /// * `blocks_per_sm` - Number of blocks that can run concurrently per SM
+    /// * `max_blocks` - Maximum cooperative grid size (blocks_per_sm × SM count)
+    ///
+    /// Returns an error if occupancy is zero, indicating the kernel uses too many resources.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use cust::prelude::*;
+    /// # use cust::function::BlockSize;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let _ctx = cust::quick_init()?;
+    /// # let module = Module::from_ptx("", &[])?;
+    /// # let function = module.get_function("kernel")?;
+    /// let block_size = BlockSize::xyz(256, 1, 1);
+    /// let (blocks_per_sm, max_blocks) = function.check_kernel_occupancy(block_size, 0)?;
+    /// println!("Occupancy: {} blocks/SM, max cooperative grid: {} blocks",
+    ///          blocks_per_sm, max_blocks);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn check_kernel_occupancy(
+        &self,
+        block_size: BlockSize,
+        dynamic_smem_size: usize,
+    ) -> CudaResult<(u32, i32)> {
+        let blocks_per_sm = self.max_active_blocks_per_multiprocessor(
+            block_size,
+            dynamic_smem_size,
+        )?;
+
+        if blocks_per_sm == 0 {
+            eprintln!(
+                "ERROR: Kernel occupancy is 0! Cannot launch cooperatively.\n\
+                 The kernel uses too many resources (registers or shared memory) \
+                 for the given configuration.\n\
+                 Solutions:\n\
+                 1. Add #[launch_bounds(max_threads, min_blocks)] to reduce register usage\n\
+                 2. Reduce shared memory usage (current: {} bytes)\n\
+                 3. Reduce threads per block (current: {})\n\
+                 4. Simplify kernel code to reduce register pressure",
+                dynamic_smem_size,
+                block_size.x * block_size.y * block_size.z
+            );
+            return Err(crate::error::CudaError::InvalidValue);
+        }
+
+        let device = CurrentContext::get_device()?;
+        let sm_count = device.get_attribute(DeviceAttribute::MultiprocessorCount)?;
+        let max_blocks = blocks_per_sm as i32 * sm_count;
+
+        Ok((blocks_per_sm, max_blocks))
     }
 }
 
