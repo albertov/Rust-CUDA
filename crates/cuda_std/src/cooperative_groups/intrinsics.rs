@@ -210,35 +210,23 @@ pub unsafe fn sync_grids_arrive(arrived: *mut u32) -> u32 {
             1u32
         };
 
-        // Architecture-specific atomic operation
-        #[cfg(target_arch_sm = "sm_70")]
-        {
-            // SM 7.0+: Use release atomic for efficient memory ordering
-            // PTX: atom.add.release.gpu.u32 old,[arrived],nb;
-            //
-            // The release semantic ensures all prior memory writes are visible
-            // before the arrival counter is incremented.
-            asm!(
-                "atom.add.release.gpu.u32 {old},[{addr}],{val};",
-                old = out(reg32) old_arrive,
-                addr = in(reg64) arrived,
-                val = in(reg32) nb,
-                options(nostack)
-            );
-        }
-
-        #[cfg(not(target_arch_sm = "sm_70"))]
-        {
-            // SM 6.0-6.9: Use fence + relaxed atomic
-            // PTX: fence.sc.gpu; followed by atom.add.relaxed.gpu.u32
-            //
-            // The fence provides memory ordering, then atomic increments.
-            // This is less efficient but compatible with older architectures.
-            use crate::atomic::intrinsics::{atomic_fetch_add_relaxed_u32_device, fence_sc_device};
-
-            fence_sc_device();
-            old_arrive = atomic_fetch_add_relaxed_u32_device(arrived, nb);
-        }
+        // SM 7.0+: Use release atomic for efficient memory ordering
+        // PTX: atom.add.release.gpu.u32 old,[arrived],nb;
+        //
+        // The release semantic ensures all prior memory writes are visible
+        // before the arrival counter is incremented.
+        //
+        // Note: Unconditionally use release atomics since cuda_std requires SM 7.0+
+        // (build.rs targets Compute70). Rust does not expose CUDA compute capability
+        // as a compile-time cfg flag, so architecture selection must be done at build time.
+        use core::arch::asm;
+        asm!(
+            "atom.add.release.gpu.u32 {old},[{addr}],{val};",
+            old = out(reg32) old_arrive,
+            addr = in(reg64) arrived,
+            val = in(reg32) nb,
+            options(nostack)
+        );
     }
 
     // Step 3: Return the old arrival value (only meaningful for CTA master)
@@ -282,47 +270,28 @@ pub unsafe fn sync_grids_wait(old_arrive: u32, arrived: *const u32) {
 
     // Step 1: CTA master waits for barrier flip
     if is_cta_master() {
-        #[cfg(target_arch_sm = "sm_70")]
-        {
-            // SM 7.0+: Use acquire load for efficient memory ordering
-            // PTX: ld.acquire.gpu.u32 current,[arrived];
-            //
-            // The acquire semantic ensures all memory writes from other blocks
-            // are visible after the load completes.
-            let mut current_arrive: u32;
-            loop {
-                asm!(
-                    "ld.acquire.gpu.u32 {current},[{addr}];",
-                    current = out(reg32) current_arrive,
-                    addr = in(reg64) arrived,
-                    options(nostack, readonly)
-                );
+        // SM 7.0+: Use acquire load for efficient memory ordering
+        // PTX: ld.acquire.gpu.u32 current,[arrived];
+        //
+        // The acquire semantic ensures all memory writes from other blocks
+        // are visible after the load completes.
+        //
+        // Note: Unconditionally use acquire loads since cuda_std requires SM 7.0+
+        // (build.rs targets Compute70). Rust does not expose CUDA compute capability
+        // as a compile-time cfg flag, so architecture selection must be done at build time.
+        use core::arch::asm;
+        let mut current_arrive: u32;
+        loop {
+            asm!(
+                "ld.acquire.gpu.u32 {current},[{addr}];",
+                current = out(reg32) current_arrive,
+                addr = in(reg64) arrived,
+                options(nostack, readonly)
+            );
 
-                if bar_has_flipped(old_arrive, current_arrive) {
-                    break;
-                }
+            if bar_has_flipped(old_arrive, current_arrive) {
+                break;
             }
-        }
-
-        #[cfg(not(target_arch_sm = "sm_70"))]
-        {
-            // SM 6.0-6.9: Use acquire load + fence
-            // PTX: ld.acquire.gpu.u32 followed by fence.sc.gpu
-            //
-            // Acquire load ensures cache coherency across SMs (prevents spinning on stale L1 cache).
-            // Additional fence after loop provides extra memory ordering guarantee.
-            use crate::atomic::intrinsics::{atomic_load_acquire_32_device, fence_sc_device};
-
-            loop {
-                let current_arrive = atomic_load_acquire_32_device(arrived);
-
-                if bar_has_flipped(old_arrive, current_arrive) {
-                    break;
-                }
-            }
-
-            // Fence after detecting flip ensures memory visibility
-            fence_sc_device();
         }
     }
 
