@@ -471,19 +471,14 @@ impl<'a> GridGroup<'a> {
         unsafe {
             use super::intrinsics::is_cta_master;
             use core::arch::asm;
-            use crate::thread::block_dim;
 
             let workspace = self.workspace as u64;
             let mut old_arrive: u32 = 0;
 
-            // Calculate threads per block for barrier
-            let block = block_dim();
-            let threads_per_block = block.x * block.y * block.z;
-
             // Step 1: Block-level synchronization first (using barrier 0 for consistency)
+            // Use barrier.sync without thread count - hardware determines participation
             asm!(
-                "bar.sync 0, {};",
-                in(reg32) threads_per_block,
+                "barrier.sync 0;",
                 options(nostack)
             );
 
@@ -530,9 +525,9 @@ impl<'a> GridGroup<'a> {
             }
 
             // Step 4: Block-level sync to ensure all threads wait (using barrier 0 for consistency)
+            // Use barrier.sync without thread count - hardware determines participation
             asm!(
-                "bar.sync 0, {};",
-                in(reg32) threads_per_block,
+                "barrier.sync 0;",
                 options(nostack)
             );
         }
