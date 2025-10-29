@@ -1388,3 +1388,496 @@ impl<const SIZE: u32> super::traits::ThreadGroup for TiledGroup<SIZE> {
         TiledGroup::thread_rank(self)
     }
 }
+
+/// A handle to a dynamically-sized tile of threads partitioned from a thread block.
+///
+/// `DynamicTiledGroup` represents a subset of threads within a thread block where
+/// the tile size is determined at runtime rather than compile-time. This is useful
+/// when the tile size depends on kernel parameters or runtime configuration.
+///
+/// # Comparison with TiledGroup<SIZE>
+///
+/// - `TiledGroup<SIZE>`: Size known at compile-time (const generic)
+/// - `DynamicTiledGroup`: Size determined at runtime
+///
+/// Both provide identical operations and semantics, just with different
+/// compile-time vs runtime trade-offs.
+///
+/// # Construction
+///
+/// Create via the `tiled_partition_dynamic()` function:
+///
+/// ```no_run
+/// use cuda_std::cooperative_groups::*;
+/// let block = this_thread_block();
+/// let tile = tiled_partition_dynamic(&block, 32);
+/// ```
+///
+/// # Example
+///
+/// ```no_run
+/// use cuda_std::cooperative_groups::*;
+///
+/// #[kernel]
+/// pub unsafe fn adaptive_kernel(data: *mut i32, tile_size: u32) {
+///     let block = this_thread_block();
+///
+///     // Tile size determined at runtime from kernel parameter
+///     let tile = tiled_partition_dynamic(&block, tile_size);
+///
+///     // Use tile for warp-level operations
+///     data.add(tile.thread_rank() as usize).write(compute_value());
+///     tile.sync();
+///     let neighbor = data.add(((tile.thread_rank() + 1) % tile.size()) as usize).read();
+/// }
+/// ```
+#[repr(C)]
+pub struct DynamicTiledGroup {
+    /// Thread participation mask for this tile.
+    mask: u32,
+
+    /// Thread rank within the tile [0, size).
+    rank: u32,
+
+    /// Tile size (number of threads in tile).
+    /// Must be power of 2, divide 32, and be in range [1, 32].
+    size: u32,
+}
+
+/// Creates a tiled partition with runtime size selection.
+///
+/// This function partitions the parent thread block into tiles where the size
+/// is determined at runtime. This is useful when tile size depends on kernel
+/// parameters or runtime configuration.
+///
+/// # Arguments
+///
+/// - `parent`: The parent thread block to partition
+/// - `size`: Tile size (must be power of 2, divide 32, range: 1-32)
+///
+/// # Returns
+///
+/// A `DynamicTiledGroup` handle representing this thread's tile.
+///
+/// # Panics
+///
+/// Panics (in debug builds) if size is not a power of 2 or does not divide 32.
+/// In release builds, invalid sizes may cause undefined behavior.
+///
+/// # Example
+///
+/// ```no_run
+/// use cuda_std::cooperative_groups::*;
+///
+/// #[kernel]
+/// pub unsafe fn runtime_tile_size(data: *mut f32, size: u32) {
+///     let block = this_thread_block();
+///     let tile = tiled_partition_dynamic(&block, size);
+///
+///     // Use tile with runtime-determined size
+///     process_local_data(data);
+///     tile.sync();
+///     update_shared_state(data);
+/// }
+/// ```
+#[inline(always)]
+pub fn tiled_partition_dynamic(_parent: &ThreadBlock, size: u32) -> DynamicTiledGroup {
+    use crate::thread::thread_idx_x;
+
+    // Validate size at runtime (debug mode only for performance)
+    debug_assert!(size > 0, "Tile size must be greater than 0");
+    debug_assert!(size <= 32, "Tile size cannot exceed warp size (32)");
+    debug_assert!(size.is_power_of_two(), "Tile size must be a power of 2");
+    debug_assert!(32 % size == 0, "Tile size must divide warp size (32)");
+
+    // Get lane ID within warp (0-31)
+    let lane_id = thread_idx_x() % 32;
+
+    // Calculate which tile this thread belongs to
+    let tile_id = lane_id / size;
+
+    // Calculate rank within tile
+    let rank = lane_id % size;
+
+    // Compute participation mask for this tile
+    let mask = compute_tile_mask(size, tile_id);
+
+    DynamicTiledGroup { mask, rank, size }
+}
+
+impl DynamicTiledGroup {
+    /// Synchronizes all threads within the tile.
+    ///
+    /// Identical semantics to `TiledGroup::sync()`, but uses runtime size.
+    /// See [`TiledGroup::sync()`] for detailed documentation.
+    #[inline(always)]
+    pub fn sync(&self) {
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            asm!(
+                "bar.warp.sync {mask};",
+                mask = in(reg32) self.mask,
+                options(nostack)
+            );
+        }
+    }
+
+    /// Returns the total number of threads in the tile.
+    ///
+    /// # Returns
+    ///
+    /// The tile size (determined at runtime). Thread ranks are in the range [0, size).
+    #[inline(always)]
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
+    /// Returns the rank of the calling thread within the tile.
+    ///
+    /// # Returns
+    ///
+    /// Thread index within the tile in the range [0, size).
+    #[inline(always)]
+    pub fn thread_rank(&self) -> u32 {
+        self.rank
+    }
+
+    /// Broadcasts a value from a specific source lane to all threads in the tile.
+    ///
+    /// Identical semantics to `TiledGroup::shfl()`, but uses runtime size.
+    /// See [`TiledGroup::shfl()`] for detailed documentation.
+    #[inline(always)]
+    pub fn shfl(&self, var: i32, src_lane: u32) -> i32 {
+        let result: i32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            {
+                let max_lane = self.size - 1;
+                asm!(
+                    "shfl.sync.idx.b32 {result}, {var}, {src}, {max_lane}, {mask};",
+                    result = out(reg32) result,
+                    var = in(reg32) var,
+                    src = in(reg32) src_lane,
+                    max_lane = in(reg32) max_lane,
+                    mask = in(reg32) self.mask,
+                    options(nostack, nomem)
+                );
+            }
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                result = var;
+            }
+        }
+        result
+    }
+
+    /// Shifts values down within the tile.
+    ///
+    /// Identical semantics to `TiledGroup::shfl_down()`, but uses runtime size.
+    /// See [`TiledGroup::shfl_down()`] for detailed documentation.
+    #[inline(always)]
+    pub fn shfl_down(&self, var: i32, delta: u32) -> i32 {
+        let result: i32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            {
+                let max_lane = self.size - 1;
+                asm!(
+                    "shfl.sync.down.b32 {result}, {var}, {delta}, {max_lane}, {mask};",
+                    result = out(reg32) result,
+                    var = in(reg32) var,
+                    delta = in(reg32) delta,
+                    max_lane = in(reg32) max_lane,
+                    mask = in(reg32) self.mask,
+                    options(nostack, nomem)
+                );
+            }
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                result = var;
+            }
+        }
+        result
+    }
+
+    /// Shifts values up within the tile.
+    ///
+    /// Identical semantics to `TiledGroup::shfl_up()`, but uses runtime size.
+    /// See [`TiledGroup::shfl_up()`] for detailed documentation.
+    #[inline(always)]
+    pub fn shfl_up(&self, var: i32, delta: u32) -> i32 {
+        let result: i32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            asm!(
+                "shfl.sync.up.b32 {result}, {var}, {delta}, 0x0, {mask};",
+                result = out(reg32) result,
+                var = in(reg32) var,
+                delta = in(reg32) delta,
+                mask = in(reg32) self.mask,
+                options(nostack, nomem)
+            );
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                result = var;
+            }
+        }
+        result
+    }
+
+    /// Butterfly shuffle using XOR-based lane addressing.
+    ///
+    /// Identical semantics to `TiledGroup::shfl_xor()`, but uses runtime size.
+    /// See [`TiledGroup::shfl_xor()`] for detailed documentation.
+    #[inline(always)]
+    pub fn shfl_xor(&self, var: i32, lane_mask: u32) -> i32 {
+        let result: i32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            {
+                let max_lane = self.size - 1;
+                asm!(
+                    "shfl.sync.bfly.b32 {result}, {var}, {mask}, {max_lane}, {thread_mask};",
+                    result = out(reg32) result,
+                    var = in(reg32) var,
+                    mask = in(reg32) lane_mask,
+                    max_lane = in(reg32) max_lane,
+                    thread_mask = in(reg32) self.mask,
+                    options(nostack, nomem)
+                );
+            }
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                result = var;
+            }
+        }
+        result
+    }
+
+    /// Checks if ANY thread in the tile has a true predicate.
+    ///
+    /// Identical semantics to `TiledGroup::any()`, but uses runtime size.
+    /// See [`TiledGroup::any()`] for detailed documentation.
+    #[inline(always)]
+    pub fn any(&self, predicate: bool) -> bool {
+        let result: u32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            {
+                let pred_val: u32 = if predicate { 1 } else { 0 };
+                asm!(
+                    "{{",
+                    ".reg .pred %p_input, %p_result;",
+                    "setp.ne.u32 %p_input, {pred_val}, 0;",
+                    "vote.sync.any.pred %p_result, %p_input, {mask};",
+                    "selp.u32 {result}, 1, 0, %p_result;",
+                    "}}",
+                    result = out(reg32) result,
+                    pred_val = in(reg32) pred_val,
+                    mask = in(reg32) self.mask,
+                    options(nostack)
+                );
+            }
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                result = if predicate { 1 } else { 0 };
+            }
+        }
+        result != 0
+    }
+
+    /// Checks if ALL threads in the tile have a true predicate.
+    ///
+    /// Identical semantics to `TiledGroup::all()`, but uses runtime size.
+    /// See [`TiledGroup::all()`] for detailed documentation.
+    #[inline(always)]
+    pub fn all(&self, predicate: bool) -> bool {
+        let result: u32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            {
+                let pred_val: u32 = if predicate { 1 } else { 0 };
+                asm!(
+                    "{{",
+                    ".reg .pred %p_input, %p_result;",
+                    "setp.ne.u32 %p_input, {pred_val}, 0;",
+                    "vote.sync.all.pred %p_result, %p_input, {mask};",
+                    "selp.u32 {result}, 1, 0, %p_result;",
+                    "}}",
+                    result = out(reg32) result,
+                    pred_val = in(reg32) pred_val,
+                    mask = in(reg32) self.mask,
+                    options(nostack)
+                );
+            }
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                result = if predicate { 1 } else { 0 };
+            }
+        }
+        result != 0
+    }
+
+    /// Collects votes from all threads as a bitmask.
+    ///
+    /// Identical semantics to `TiledGroup::ballot()`, but uses runtime size.
+    /// See [`TiledGroup::ballot()`] for detailed documentation.
+    #[inline(always)]
+    pub fn ballot(&self, predicate: bool) -> u32 {
+        let result: u32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            {
+                let pred_val: u32 = if predicate { 1 } else { 0 };
+                asm!(
+                    "{{",
+                    ".reg .pred %p_input;",
+                    "setp.ne.u32 %p_input, {pred_val}, 0;",
+                    "vote.sync.ballot.b32 {result}, %p_input, {mask};",
+                    "}}",
+                    result = out(reg32) result,
+                    pred_val = in(reg32) pred_val,
+                    mask = in(reg32) self.mask,
+                    options(nostack)
+                );
+            }
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                result = if predicate { 1 } else { 0 };
+            }
+        }
+        result
+    }
+
+    /// Finds threads with matching values (SM 7.0+).
+    ///
+    /// Identical semantics to `TiledGroup::match_any()`, but uses runtime size.
+    /// See [`TiledGroup::match_any()`] for detailed documentation.
+    #[inline(always)]
+    pub fn match_any(&self, value: i32) -> u32 {
+        let result: u32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            {
+                asm!(
+                    "match.sync.any.b32 {result}, {value}, {mask};",
+                    result = out(reg32) result,
+                    value = in(reg32) value,
+                    mask = in(reg32) self.mask,
+                    options(nostack)
+                );
+            }
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                result = 1u32 << self.rank;
+            }
+        }
+        result
+    }
+
+    /// Finds threads with matching values and checks for unanimity (SM 7.0+).
+    ///
+    /// Identical semantics to `TiledGroup::match_all()`, but uses runtime size.
+    /// See [`TiledGroup::match_all()`] for detailed documentation.
+    #[inline(always)]
+    pub fn match_all(&self, value: i32) -> (u32, bool) {
+        let mask: u32;
+        let all_match: u32;
+        #[allow(unused_unsafe)]
+        unsafe {
+            #[cfg(target_os = "cuda")]
+            use core::arch::asm;
+
+            #[cfg(target_os = "cuda")]
+            {
+                asm!(
+                    "{{",
+                    ".reg .pred %p_all;",
+                    "match.all.sync.b32 {mask}|%p_all, {value}, {thread_mask};",
+                    "selp.u32 {all_match}, 1, 0, %p_all;",
+                    "}}",
+                    mask = out(reg32) mask,
+                    all_match = out(reg32) all_match,
+                    value = in(reg32) value,
+                    thread_mask = in(reg32) self.mask,
+                    options(nostack)
+                );
+            }
+
+            #[cfg(not(target_os = "cuda"))]
+            {
+                mask = 1u32 << self.rank;
+                all_match = 0;
+            }
+        }
+        (mask, all_match != 0)
+    }
+}
+
+// Safety: DynamicTiledGroup can be safely sent between threads within the kernel
+unsafe impl Send for DynamicTiledGroup {}
+
+// Safety: DynamicTiledGroup can be safely shared between threads within the kernel
+unsafe impl Sync for DynamicTiledGroup {}
+
+// Implement ThreadGroup trait for polymorphic cooperative group operations
+impl super::traits::ThreadGroup for DynamicTiledGroup {
+    #[inline(always)]
+    fn sync(&self) {
+        DynamicTiledGroup::sync(self)
+    }
+
+    #[inline(always)]
+    fn size(&self) -> u32 {
+        DynamicTiledGroup::size(self)
+    }
+
+    #[inline(always)]
+    fn thread_rank(&self) -> u32 {
+        DynamicTiledGroup::thread_rank(self)
+    }
+}

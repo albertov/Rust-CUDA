@@ -125,5 +125,5 @@ pub mod traits;
 // Re-export public API for convenience
 pub use grid::{GridGroup, this_grid};
 pub use thread_block::{ThreadBlock, this_thread_block};
-pub use tiled_partition::{TiledGroup, tiled_partition};
+pub use tiled_partition::{DynamicTiledGroup, TiledGroup, tiled_partition, tiled_partition_dynamic};
 pub use traits::ThreadGroup;
