@@ -187,6 +187,12 @@ pub struct TiledGroup<const SIZE: u32> {
 /// ```
 #[inline(always)]
 const fn compute_tile_mask(size: u32, tile_id: u32) -> u32 {
+    // Special case: full warp (size=32) must return 0xFFFFFFFF
+    // Cannot compute via (1u32 << 32) - 1 because shifting by 32 bits is UB
+    if size == 32 {
+        return 0xFFFFFFFF;
+    }
+
     // Create N consecutive 1-bits: (1 << N) - 1
     // For size=8: (1 << 8) - 1 = 0xFF
     let ones = (1u32 << size) - 1;
@@ -1317,14 +1323,16 @@ impl<const SIZE: u32> TiledGroup<SIZE> {
 
             #[cfg(target_os = "cuda")]
             {
-                // PTX match.sync.all.b32 compares values and checks unanimity
+                // PTX match.all.sync.b32 compares values and checks unanimity
+                // Uses pipe syntax: dest_reg|dest_pred for composite output
+                // Instruction format: match.all.sync.b32 %r|%p, value, mask;
                 // Returns:
-                //   - mask: bitmask of threads with matching values
-                //   - predicate: true if ALL threads have the same value
+                //   - mask: bitmask of threads with matching values (in %r)
+                //   - predicate: true if ALL threads have the same value (in %p)
                 asm!(
                     "{{",
                     ".reg .pred %p_all;",
-                    "match.sync.all.b32 {mask}, {value}, %p_all, {thread_mask};",
+                    "match.all.sync.b32 {mask}|%p_all, {value}, {thread_mask};",
                     "selp.u32 {all_match}, 1, 0, %p_all;",
                     "}}",
                     mask = out(reg32) mask,
