@@ -720,3 +720,30 @@ unsafe impl<'a> Send for GridGroup<'a> {}
 // Safety: GridGroup can be safely shared between threads within the kernel
 // The underlying synchronization primitives are designed for concurrent use
 unsafe impl<'a> Sync for GridGroup<'a> {}
+
+// Implement ThreadGroup trait for polymorphic cooperative group operations
+impl<'a> super::traits::ThreadGroup for GridGroup<'a> {
+    /// Synchronizes all threads across all blocks in the grid.
+    ///
+    /// Delegates to [`GridGroup::sync()`].
+    #[inline(always)]
+    fn sync(&self) {
+        GridGroup::sync(self)
+    }
+
+    /// Returns the total number of threads in the grid.
+    ///
+    /// Delegates to [`GridGroup::size()`].
+    #[inline(always)]
+    fn size(&self) -> u32 {
+        GridGroup::size(self)
+    }
+
+    /// Returns the global rank of the calling thread within the grid.
+    ///
+    /// Delegates to [`GridGroup::thread_rank()`].
+    #[inline(always)]
+    fn thread_rank(&self) -> u32 {
+        GridGroup::thread_rank(self)
+    }
+}

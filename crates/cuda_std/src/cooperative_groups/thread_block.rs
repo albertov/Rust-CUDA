@@ -484,3 +484,30 @@ unsafe impl<'a> Send for ThreadBlock<'a> {}
 // Safety: ThreadBlock can be safely shared between threads within the kernel
 // The underlying synchronization primitives are designed for concurrent use
 unsafe impl<'a> Sync for ThreadBlock<'a> {}
+
+// Implement ThreadGroup trait for polymorphic cooperative group operations
+impl<'a> super::traits::ThreadGroup for ThreadBlock<'a> {
+    /// Synchronizes all threads within the thread block.
+    ///
+    /// Delegates to [`ThreadBlock::sync()`].
+    #[inline(always)]
+    fn sync(&self) {
+        ThreadBlock::sync(self)
+    }
+
+    /// Returns the total number of threads in the thread block.
+    ///
+    /// Delegates to [`ThreadBlock::size()`].
+    #[inline(always)]
+    fn size(&self) -> u32 {
+        ThreadBlock::size(self)
+    }
+
+    /// Returns the rank of the calling thread within the thread block.
+    ///
+    /// Delegates to [`ThreadBlock::thread_rank()`].
+    #[inline(always)]
+    fn thread_rank(&self) -> u32 {
+        ThreadBlock::thread_rank(self)
+    }
+}
