@@ -118,6 +118,8 @@
 
 pub mod intrinsics;
 pub mod grid;
+pub mod thread_block;
 
 // Re-export public API for convenience
 pub use grid::{GridGroup, this_grid};
+pub use thread_block::{ThreadBlock, this_thread_block};
