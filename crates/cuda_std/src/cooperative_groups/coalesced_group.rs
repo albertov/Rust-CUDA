@@ -71,6 +71,41 @@
 //! 2. **Same Warp**: Only threads within the same warp can form a coalesced group
 //! 3. **Consistent Mask**: All operations must use the mask captured at group creation time
 //!
+//! # Known Limitations
+//!
+//! ## Rust Compiler Optimization Affecting Divergence Detection
+//!
+//! **Critical Issue**: Due to Rust compiler optimizations, the `activemask.b32` instruction
+//! may not correctly detect branch divergence when called from Rust-compiled kernels. The
+//! compiler can eliminate branches it considers side-effect-free, causing `activemask.b32`
+//! to always return 0xFFFFFFFF (all threads active) even when logical divergence exists.
+//!
+//! **Impact**:
+//! - Divergent execution patterns (if/else splits, modulo conditions) may appear convergent
+//! - `coalesced_threads()` may report incorrect group sizes and masks
+//! - Rank calculations based on divergence will be incorrect
+//!
+//! **Working Scenarios**:
+//! - Convergent execution (all threads same path) works correctly
+//! - Vote operations (any, all, ballot) work correctly
+//! - Calling from C++ or hand-written PTX works correctly
+//!
+//! **Workarounds**:
+//! 1. Use C++ cooperative_groups for divergent kernels (see tests/cuda_std_cg_tests/cpp_reference/coalesced_tests.cu)
+//! 2. Call Rust coalesced group functions from C++-compiled kernels
+//! 3. Use explicit warp intrinsics (__ballot_sync, __activemask) if available in your Rust context
+//!
+//! **Example of Issue**:
+//! ```no_run
+//! // This Rust code may NOT detect divergence correctly:
+//! if thread_id < 16 {
+//!     let group = coalesced_threads();  // May report size=32 instead of 16
+//! }
+//! ```
+//!
+//! For production use requiring correct divergence detection, consider calling from C++
+//! or verifying behavior with actual GPU execution.
+//!
 //! # Performance Considerations
 //!
 //! - Very lightweight group creation (single PTX instruction)
