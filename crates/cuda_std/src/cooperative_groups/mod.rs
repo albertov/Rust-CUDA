@@ -120,10 +120,12 @@ pub mod intrinsics;
 pub mod grid;
 pub mod thread_block;
 pub mod tiled_partition;
+pub mod coalesced_group;
 pub mod traits;
 
 // Re-export public API for convenience
 pub use grid::{GridGroup, this_grid};
 pub use thread_block::{ThreadBlock, this_thread_block};
 pub use tiled_partition::{DynamicTiledGroup, TiledGroup, tiled_partition, tiled_partition_dynamic};
+pub use coalesced_group::{CoalescedGroup, coalesced_threads};
 pub use traits::ThreadGroup;
