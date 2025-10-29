@@ -172,4 +172,155 @@ pub trait ThreadGroup {
     /// For groups larger than 32 threads (like ThreadBlock), this returns
     /// the mask for the current thread's warp (0xFFFFFFFF for full warp participation).
     fn mask(&self) -> u32;
+
+    /// Performs a reduction across all threads in the group using addition.
+    ///
+    /// All threads in the group contribute their `value`, and the operation
+    /// returns the sum of all values. Uses hardware-accelerated `redux.sync.add`
+    /// instruction on SM 8.0+ (Ampere and newer).
+    ///
+    /// # Arguments
+    ///
+    /// - `value`: The value contributed by this thread
+    ///
+    /// # Returns
+    ///
+    /// The sum of all values from all threads in the group.
+    ///
+    /// # Requirements
+    ///
+    /// - SM 8.0+ (Ampere architecture or newer)
+    /// - All threads in the group must call this function uniformly
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use cuda_std::cooperative_groups::*;
+    ///
+    /// #[kernel]
+    /// pub unsafe fn sum_kernel(output: *mut i32) {
+    ///     let block = this_thread_block();
+    ///     let tile = tiled_partition::<32>(&block);
+    ///
+    ///     let value = tile.thread_rank() as i32; // Each thread contributes its rank
+    ///     let sum = tile.reduce_add(value);      // Sum across all threads
+    ///
+    ///     if tile.thread_rank() == 0 {
+    ///         *output = sum; // Thread 0 writes result (sum = 0+1+2+...+31 = 496)
+    ///     }
+    /// }
+    /// ```
+    fn reduce_add<T: crate::warp::WarpReduceValue>(&self, value: T) -> T {
+        unsafe { crate::warp::warp_reduce(self.mask(), value, crate::warp::WarpReductionOp::Add) }
+    }
+
+    /// Performs a reduction across all threads in the group using minimum.
+    ///
+    /// All threads in the group contribute their `value`, and the operation
+    /// returns the minimum value. Uses hardware-accelerated `redux.sync.min`
+    /// instruction on SM 8.0+.
+    ///
+    /// # Arguments
+    ///
+    /// - `value`: The value contributed by this thread
+    ///
+    /// # Returns
+    ///
+    /// The minimum value from all threads in the group.
+    ///
+    /// # Requirements
+    ///
+    /// - SM 8.0+ (Ampere architecture or newer)
+    /// - All threads in the group must call this function uniformly
+    fn reduce_min<T: crate::warp::WarpReduceValue>(&self, value: T) -> T {
+        unsafe { crate::warp::warp_reduce(self.mask(), value, crate::warp::WarpReductionOp::Min) }
+    }
+
+    /// Performs a reduction across all threads in the group using maximum.
+    ///
+    /// All threads in the group contribute their `value`, and the operation
+    /// returns the maximum value. Uses hardware-accelerated `redux.sync.max`
+    /// instruction on SM 8.0+.
+    ///
+    /// # Arguments
+    ///
+    /// - `value`: The value contributed by this thread
+    ///
+    /// # Returns
+    ///
+    /// The maximum value from all threads in the group.
+    ///
+    /// # Requirements
+    ///
+    /// - SM 8.0+ (Ampere architecture or newer)
+    /// - All threads in the group must call this function uniformly
+    fn reduce_max<T: crate::warp::WarpReduceValue>(&self, value: T) -> T {
+        unsafe { crate::warp::warp_reduce(self.mask(), value, crate::warp::WarpReductionOp::Max) }
+    }
+
+    /// Performs a bitwise AND reduction across all threads in the group.
+    ///
+    /// All threads in the group contribute their `value`, and the operation
+    /// returns the bitwise AND of all values. Uses hardware-accelerated
+    /// `redux.sync.and` instruction on SM 8.0+.
+    ///
+    /// # Arguments
+    ///
+    /// - `value`: The value contributed by this thread
+    ///
+    /// # Returns
+    ///
+    /// The bitwise AND of all values from all threads in the group.
+    ///
+    /// # Requirements
+    ///
+    /// - SM 8.0+ (Ampere architecture or newer)
+    /// - All threads in the group must call this function uniformly
+    fn reduce_and<T: crate::warp::WarpReduceValue>(&self, value: T) -> T {
+        unsafe { crate::warp::warp_reduce(self.mask(), value, crate::warp::WarpReductionOp::And) }
+    }
+
+    /// Performs a bitwise OR reduction across all threads in the group.
+    ///
+    /// All threads in the group contribute their `value`, and the operation
+    /// returns the bitwise OR of all values. Uses hardware-accelerated
+    /// `redux.sync.or` instruction on SM 8.0+.
+    ///
+    /// # Arguments
+    ///
+    /// - `value`: The value contributed by this thread
+    ///
+    /// # Returns
+    ///
+    /// The bitwise OR of all values from all threads in the group.
+    ///
+    /// # Requirements
+    ///
+    /// - SM 8.0+ (Ampere architecture or newer)
+    /// - All threads in the group must call this function uniformly
+    fn reduce_or<T: crate::warp::WarpReduceValue>(&self, value: T) -> T {
+        unsafe { crate::warp::warp_reduce(self.mask(), value, crate::warp::WarpReductionOp::Or) }
+    }
+
+    /// Performs a bitwise XOR reduction across all threads in the group.
+    ///
+    /// All threads in the group contribute their `value`, and the operation
+    /// returns the bitwise XOR of all values. Uses hardware-accelerated
+    /// `redux.sync.xor` instruction on SM 8.0+.
+    ///
+    /// # Arguments
+    ///
+    /// - `value`: The value contributed by this thread
+    ///
+    /// # Returns
+    ///
+    /// The bitwise XOR of all values from all threads in the group.
+    ///
+    /// # Requirements
+    ///
+    /// - SM 8.0+ (Ampere architecture or newer)
+    /// - All threads in the group must call this function uniformly
+    fn reduce_xor<T: crate::warp::WarpReduceValue>(&self, value: T) -> T {
+        unsafe { crate::warp::warp_reduce(self.mask(), value, crate::warp::WarpReductionOp::Xor) }
+    }
 }
