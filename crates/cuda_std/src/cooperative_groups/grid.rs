@@ -468,15 +468,20 @@ impl<'a> GridGroup<'a> {
         //
         // SAFETY: Requires cooperative kernel launch and uniform participation
 
+        #[allow(unused_unsafe)]
         unsafe {
             use super::intrinsics::is_cta_master;
+            #[cfg(target_os = "cuda")]
             use core::arch::asm;
 
+            #[cfg_attr(not(target_os = "cuda"), allow(unused_variables))]
             let workspace = self.workspace as u64;
+            #[cfg_attr(not(target_os = "cuda"), allow(unused_mut))]
             let mut old_arrive: u32 = 0;
 
             // Step 1: Block-level synchronization first (using barrier 0 for consistency)
             // Use barrier.sync without thread count - hardware determines participation
+            #[cfg(target_os = "cuda")]
             asm!(
                 "barrier.sync 0;",
                 options(nostack)
@@ -489,6 +494,7 @@ impl<'a> GridGroup<'a> {
                 let num_blocks = grid.x * grid.y * grid.z;
 
                 // GPU master (block 0,0,0) uses flip value, other blocks add 1
+                #[cfg_attr(not(target_os = "cuda"), allow(unused_variables))]
                 let nb = if self.is_master() {
                     0x80000000u32 - (num_blocks - 1)
                 } else {
@@ -496,6 +502,7 @@ impl<'a> GridGroup<'a> {
                 };
 
                 // Atomic add with release semantics (SM 7.0+)
+                #[cfg(target_os = "cuda")]
                 asm!(
                     "atom.add.release.gpu.u32 {result}, [{workspace}], {value};",
                     result = out(reg32) old_arrive,
@@ -507,8 +514,10 @@ impl<'a> GridGroup<'a> {
 
             // Step 3: Wait for barrier flip (only CTA masters poll)
             if is_cta_master() {
-                let mut current_arrive: u32;
+                #[cfg_attr(not(target_os = "cuda"), allow(unused_mut))]
+                let mut current_arrive: u32 = 0;
                 loop {
+                    #[cfg(target_os = "cuda")]
                     asm!(
                         "ld.acquire.gpu.u32 {result}, [{workspace}];",
                         result = out(reg32) current_arrive,
@@ -526,6 +535,7 @@ impl<'a> GridGroup<'a> {
 
             // Step 4: Block-level sync to ensure all threads wait (using barrier 0 for consistency)
             // Use barrier.sync without thread count - hardware determines participation
+            #[cfg(target_os = "cuda")]
             asm!(
                 "barrier.sync 0;",
                 options(nostack)

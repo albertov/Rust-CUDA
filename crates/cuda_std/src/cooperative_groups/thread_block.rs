@@ -314,14 +314,18 @@ impl<'a> ThreadBlock<'a> {
         // Barrier ID 0 is the default block-level barrier. All threads in the
         // block must arrive at this barrier before any can proceed.
 
+        #[allow(unused_unsafe)]
         unsafe {
             use crate::thread::{block_dim_x, block_dim_y, block_dim_z};
+            #[cfg(target_os = "cuda")]
             use core::arch::asm;
 
             // Calculate total threads in block
+            #[cfg_attr(not(target_os = "cuda"), allow(unused_variables))]
             let threads_per_block = block_dim_x() * block_dim_y() * block_dim_z();
 
             // Execute block-level barrier with explicit thread count
+            #[cfg(target_os = "cuda")]
             asm!(
                 "bar.sync 0, {threads};",
                 threads = in(reg32) threads_per_block,

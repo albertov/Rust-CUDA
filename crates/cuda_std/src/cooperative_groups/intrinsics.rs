@@ -141,6 +141,7 @@ pub fn is_cta_master() -> bool {
 ///
 /// `true` if the barrier has flipped to a new phase, `false` otherwise.
 #[inline(always)]
+#[allow(dead_code)]
 fn bar_has_flipped(old_arrive: u32, current_arrive: u32) -> bool {
     // NVIDIA's flip detection algorithm: checks if MSB differs
     // This handles unsigned wraparound correctly
