@@ -152,6 +152,31 @@ pub struct CoalescedGroup {
 }
 
 impl CoalescedGroup {
+    /// Create a CoalescedGroup from a mask.
+    ///
+    /// Internal helper to construct CoalescedGroup from a pre-computed mask.
+    /// Calculates rank and size from the mask and current lane ID.
+    ///
+    /// # Arguments
+    ///
+    /// - `mask`: 32-bit mask of active threads
+    ///
+    /// # Returns
+    ///
+    /// A new CoalescedGroup with computed rank and size.
+    #[inline(always)]
+    pub(crate) fn from_mask(mask: u32) -> Self {
+        let lane_id = thread::thread_idx_x() % 32;
+
+        // Rank = number of active threads with lower lane IDs
+        let rank = count_active_below(mask, lane_id);
+
+        // Size = total number of active threads
+        let size = mask.count_ones();
+
+        CoalescedGroup { mask, rank, size }
+    }
+
     /// Synchronize all active threads in this coalesced group.
     ///
     /// Uses the group's mask to synchronize only threads that were active when
@@ -498,6 +523,11 @@ impl ThreadGroup for CoalescedGroup {
     #[inline(always)]
     fn thread_rank(&self) -> u32 {
         self.rank
+    }
+
+    #[inline(always)]
+    fn mask(&self) -> u32 {
+        self.mask
     }
 }
 

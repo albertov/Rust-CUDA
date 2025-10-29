@@ -1387,6 +1387,12 @@ impl<const SIZE: u32> super::traits::ThreadGroup for TiledGroup<SIZE> {
     fn thread_rank(&self) -> u32 {
         TiledGroup::thread_rank(self)
     }
+
+    /// Returns the thread participation mask for this tile.
+    #[inline(always)]
+    fn mask(&self) -> u32 {
+        self.mask
+    }
 }
 
 /// A handle to a dynamically-sized tile of threads partitioned from a thread block.
@@ -1879,5 +1885,10 @@ impl super::traits::ThreadGroup for DynamicTiledGroup {
     #[inline(always)]
     fn thread_rank(&self) -> u32 {
         DynamicTiledGroup::thread_rank(self)
+    }
+
+    #[inline(always)]
+    fn mask(&self) -> u32 {
+        self.mask
     }
 }

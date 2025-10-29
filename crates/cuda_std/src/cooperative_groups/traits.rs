@@ -144,4 +144,32 @@ pub trait ThreadGroup {
     /// }
     /// ```
     fn thread_rank(&self) -> u32;
+
+    /// Returns the 32-bit thread participation mask for this group.
+    ///
+    /// The mask is a 32-bit value where bit N is set if lane N (thread with
+    /// `threadIdx.x % 32 == N`) participates in this group.
+    ///
+    /// # Returns
+    ///
+    /// 32-bit participation mask for threads in this group.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use cuda_std::cooperative_groups::*;
+    ///
+    /// fn check_participation<G: ThreadGroup>(group: &G) {
+    ///     let mask = group.mask();
+    ///     if mask == 0xFFFFFFFF {
+    ///         // All 32 lanes in warp are active
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// For groups larger than 32 threads (like ThreadBlock), this returns
+    /// the mask for the current thread's warp (0xFFFFFFFF for full warp participation).
+    fn mask(&self) -> u32;
 }

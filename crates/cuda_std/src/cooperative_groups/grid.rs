@@ -756,4 +756,13 @@ impl<'a> super::traits::ThreadGroup for GridGroup<'a> {
     fn thread_rank(&self) -> u32 {
         GridGroup::thread_rank(self)
     }
+
+    /// Returns the thread participation mask for the current warp.
+    ///
+    /// For GridGroup, this returns 0xFFFFFFFF (full warp participation)
+    /// since grid groups encompass all threads in each warp.
+    #[inline(always)]
+    fn mask(&self) -> u32 {
+        0xFFFFFFFF
+    }
 }
