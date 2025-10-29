@@ -119,9 +119,11 @@
 pub mod intrinsics;
 pub mod grid;
 pub mod thread_block;
+pub mod tiled_partition;
 pub mod traits;
 
 // Re-export public API for convenience
 pub use grid::{GridGroup, this_grid};
 pub use thread_block::{ThreadBlock, this_thread_block};
+pub use tiled_partition::{TiledGroup, tiled_partition};
 pub use traits::ThreadGroup;
