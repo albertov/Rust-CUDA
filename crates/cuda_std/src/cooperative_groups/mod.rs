@@ -123,6 +123,8 @@ pub mod tiled_partition;
 pub mod coalesced_group;
 pub mod partitioning;
 pub mod traits;
+pub mod memcpy_async;
+pub mod cluster;
 
 // Re-export public API for convenience
 pub use grid::{GridGroup, this_grid};
@@ -131,3 +133,5 @@ pub use tiled_partition::{DynamicTiledGroup, TiledGroup, tiled_partition, tiled_
 pub use coalesced_group::{CoalescedGroup, coalesced_threads};
 pub use partitioning::{labeled_partition, binary_partition};
 pub use traits::ThreadGroup;
+pub use memcpy_async::AsyncMemory;
+pub use cluster::{ThreadBlockCluster, this_cluster};

@@ -744,6 +744,105 @@ impl<const SIZE: u32> TiledGroup<SIZE> {
         result
     }
 
+    /// Performs an inclusive scan (prefix sum) with addition across the tile.
+    ///
+    /// This operation computes a running sum where each thread receives the sum
+    /// of all values from threads 0 through its own rank (inclusive).
+    ///
+    /// # Algorithm
+    ///
+    /// Uses the Kogge-Stone parallel scan algorithm with shuffle operations:
+    /// - Iteration 1: Each thread adds value from 1 position back
+    /// - Iteration 2: Each thread adds value from 2 positions back
+    /// - Iteration 4: Each thread adds value from 4 positions back
+    /// - etc.
+    ///
+    /// # Arguments
+    ///
+    /// - `value`: The value contributed by this thread
+    ///
+    /// # Returns
+    ///
+    /// The sum of all values from threads [0..thread_rank] (inclusive).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use cuda_std::cooperative_groups::*;
+    /// # #[kernel]
+    /// # pub unsafe fn example(output: *mut i32) {
+    /// let block = this_thread_block();
+    /// let tile = tiled_partition::<32>(&block);
+    ///
+    /// // Each thread contributes 1
+    /// let result = tile.inclusive_scan_add(1);
+    ///
+    /// // Thread 0: result = 1
+    /// // Thread 1: result = 2
+    /// // Thread 2: result = 3
+    /// // ...
+    /// // Thread 31: result = 32
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn inclusive_scan_add(&self, value: i32) -> i32 {
+        let mut result = value;
+        let mut offset = 1;
+
+        while offset < SIZE {
+            let neighbor = self.shfl_up(result, offset);
+            if self.thread_rank() >= offset {
+                result = result + neighbor;
+            }
+            offset *= 2;
+        }
+
+        result
+    }
+
+    /// Performs an exclusive scan (prefix sum) with addition across the tile.
+    ///
+    /// This operation computes a running sum where each thread receives the sum
+    /// of all values from threads 0 through rank-1 (exclusive). Thread 0 receives 0.
+    ///
+    /// # Arguments
+    ///
+    /// - `value`: The value contributed by this thread
+    ///
+    /// # Returns
+    ///
+    /// The sum of all values from threads [0..thread_rank) (exclusive).
+    /// Thread 0 returns 0.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use cuda_std::cooperative_groups::*;
+    /// # #[kernel]
+    /// # pub unsafe fn example(output: *mut i32) {
+    /// let block = this_thread_block();
+    /// let tile = tiled_partition::<32>(&block);
+    ///
+    /// // Each thread contributes 1
+    /// let result = tile.exclusive_scan_add(1);
+    ///
+    /// // Thread 0: result = 0
+    /// // Thread 1: result = 1
+    /// // Thread 2: result = 2
+    /// // ...
+    /// // Thread 31: result = 31
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn exclusive_scan_add(&self, value: i32) -> i32 {
+        // First compute inclusive scan
+        let inclusive = self.inclusive_scan_add(value);
+
+        // Convert to exclusive by subtracting own value
+        // For integral addition, exclusive[i] = inclusive[i] - value[i]
+        inclusive - value
+    }
+
     /// Checks if ANY thread in the tile has a true predicate.
     ///
     /// This is a warp-level vote operation that returns true if at least one
