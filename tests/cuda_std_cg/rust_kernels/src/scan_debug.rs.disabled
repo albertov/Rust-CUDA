@@ -1,0 +1,27 @@
+use cuda_std::cooperative_groups::*;
+use cuda_std::prelude::*;
+
+#[kernel]
+pub unsafe fn test_scan_debug(output: *mut i32) {
+    let block = this_thread_block();
+    let tile = tiled_partition::<4>(&block);
+
+    let rank = tile.thread_rank();
+    let value = 1i32;
+    let mut result = value;
+
+    // Manually do first iteration
+    let offset = 1u32;
+    let neighbor = cuda_std::warp::warp_shuffle_up(tile.mask(), result, offset, 32).0;
+
+    // Store intermediate values
+    output.add((rank * 4) as usize).write(result); // Initial value
+    output.add((rank * 4 + 1) as usize).write(neighbor); // Neighbor from shuffle
+    output.add((rank * 4 + 2) as usize).write((rank >= offset) as i32); // Condition
+
+    if rank >= offset {
+        result = result + neighbor;
+    }
+
+    output.add((rank * 4 + 3) as usize).write(result); // Final value after add
+}

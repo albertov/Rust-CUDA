@@ -1,0 +1,80 @@
+[package]
+name = "cuda_std_cg_tests"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+cust = { path = "../../crates/cust" }
+cust_core = { path = "../../crates/cust_core" }
+
+[build-dependencies]
+cuda_builder = { path = "../../crates/cuda_builder" }
+
+[lib]
+name = "cuda_std_cg_tests"
+path = "common/mod.rs"
+
+[[test]]
+name = "cluster"
+path = "cluster.rs"
+
+[[test]]
+name = "coalesced_group"
+path = "coalesced_group.rs"
+
+[[test]]
+name = "comparison_basic"
+path = "comparison_basic.rs"
+
+[[test]]
+name = "comparison_multiblock"
+path = "comparison_multiblock.rs"
+
+[[test]]
+name = "comparison_multiblock_simple"
+path = "comparison_multiblock_simple.rs"
+
+[[test]]
+name = "comparison_phases"
+path = "comparison_phases.rs"
+
+[[test]]
+name = "device_capabilities_diagnostic"
+path = "device_capabilities_diagnostic.rs"
+
+[[test]]
+name = "memcpy_async"
+path = "memcpy_async.rs"
+
+[[test]]
+name = "partitioning"
+path = "partitioning.rs"
+
+[[test]]
+name = "reduced_blocks_test"
+path = "reduced_blocks_test.rs"
+
+[[test]]
+name = "reduction"
+path = "reduction.rs"
+
+[[test]]
+name = "scan"
+path = "scan.rs"
+
+[[test]]
+name = "standalone_multiblock"
+path = "standalone_multiblock.rs"
+
+[[test]]
+name = "thread_block_basic"
+path = "thread_block_basic.rs"
+
+[[test]]
+name = "tiled_partition_basic"
+path = "tiled_partition_basic.rs"
+
+[[test]]
+name = "tiled_partition_dynamic"
+path = "tiled_partition_dynamic.rs"

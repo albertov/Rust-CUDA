@@ -1,0 +1,10 @@
+[package]
+name = "cuda_std_cg_test_kernels"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cuda_std = { path = "../../../crates/cuda_std" }
+
+[lib]
+crate-type = ["cdylib", "rlib"]

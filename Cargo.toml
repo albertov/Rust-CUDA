@@ -43,22 +43,27 @@ members = [
   "crates/optix/examples/path_tracer",
   "crates/optix/examples/path_tracer/kernels",
 
-  "examples/gemm",
-  "examples/gemm/kernels",
-  "examples/i128_demo",
-  "examples/i128_demo/kernels",
-  "examples/sha2_crates_io",
-  "examples/sha2_crates_io/kernels",
-  "examples/vecadd",
-  "examples/vecadd/kernels",
+  "examples/cuda/vecadd",
+  "examples/cuda/vecadd/kernels",
+  "examples/cuda/path_tracer",
+  "examples/cuda/path_tracer/kernels",
+  "examples/cuda/sha2_crates_io",
+  "examples/cuda/sha2_crates_io/kernels",
 
-  "samples/introduction/async_api",
-  "samples/introduction/async_api/kernels",
+  "examples/optix/*",
 
-  "tests/compiletests",
-  "tests/compiletests/deps-helper",
+  "tests/cuda_std_cg",
+  "tests/cuda_std_cg/rust_kernels",
+]
 
-  "xtask",
+exclude = [
+    "crates/optix/examples/common",
+    "crates/cuda_std/tests/rust_kernels",
+    "examples/cuda/gemm",
+    "examples/cuda/gemm/kernels",
+    "tests/compiletests",
+    "tests/compiletests/deps-helper",
+    "crates/blastoff",
 ]
 
 [profile.dev.package.rustc_codegen_nvvm]
