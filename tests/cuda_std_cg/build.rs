@@ -11,18 +11,6 @@ fn main() {
     println!("cargo::rerun-if-changed=rust_kernels");
     println!("cargo::rerun-if-changed=cpp_reference");
 
-    // CRITICAL FIX: Skip kernel compilation during normal builds to avoid circular dependency.
-    // Kernels are only compiled when explicitly requested via CUDA_STD_BUILD_KERNELS=1.
-    // This breaks the infinite recursion: cuda_std build.rs -> rust_kernels -> cuda_std -> ...
-    //
-    // Tests should set CUDA_STD_BUILD_KERNELS=1 before running to ensure PTX files exist.
-    let should_build_kernels = env::var("CUDA_STD_BUILD_KERNELS").is_ok();
-
-    if !should_build_kernels {
-        println!("cargo:warning=Skipping test kernel compilation (set CUDA_STD_BUILD_KERNELS=1 to build)");
-        return;
-    }
-
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     // Navigate from tests/cuda_std_cg/ -> tests/ -> Rust-CUDA/
     let rust_cuda_root = manifest_dir

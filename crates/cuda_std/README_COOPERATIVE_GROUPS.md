@@ -335,18 +335,6 @@ generic_algorithm(&this_thread_block(), data);
 generic_algorithm(&tiled_partition::<32>(&block), data);
 ```
 
-## Migration from Earlier Versions
-
-The previous grid sync implementation had critical deadlock issues. The current version fixes these issues and adds all cooperative groups features.
-
-**Key Changes**:
-- ✅ Grid sync now works correctly (102x faster than C++)
-- ✅ Proper bit-flip barrier algorithm
-- ✅ Memory fences for proper visibility
-- ✅ Complete feature set (tiles, coalesced, reductions, etc.)
-
-See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed migration instructions.
-
 ## Known Limitations
 
 ### Critical Limitations
