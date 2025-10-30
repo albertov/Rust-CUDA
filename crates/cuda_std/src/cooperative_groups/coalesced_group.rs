@@ -122,6 +122,7 @@
 
 use crate::thread;
 use super::traits::ThreadGroup;
+#[cfg(target_os = "cuda")]
 use core::arch::asm;
 
 /// Dynamic group of currently-active threads within a warp.
@@ -203,6 +204,7 @@ impl CoalescedGroup {
     /// group.sync();
     /// # }
     /// ```
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     pub fn sync(&self) {
         unsafe {
@@ -212,6 +214,12 @@ impl CoalescedGroup {
                 options(nostack)
             );
         }
+    }
+
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    pub fn sync(&self) {
+        unimplemented!("CoalescedGroup::sync requires CUDA target")
     }
 
     /// Returns the number of threads in this coalesced group.
@@ -299,6 +307,7 @@ impl CoalescedGroup {
     /// let broadcast = group.shfl(value, 0);
     /// # }
     /// ```
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     pub fn shfl(&self, var: i32, src_rank: u32) -> i32 {
         // Map rank to actual lane ID
@@ -316,6 +325,12 @@ impl CoalescedGroup {
             );
         }
         result
+    }
+
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    pub fn shfl(&self, _var: i32, _src_rank: u32) -> i32 {
+        unimplemented!("CoalescedGroup::shfl requires CUDA target")
     }
 
     /// Shift value down by `delta` ranks within the group.
@@ -412,6 +427,7 @@ impl CoalescedGroup {
     /// }
     /// # }
     /// ```
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     pub fn any(&self, predicate: bool) -> bool {
         let pred_val: u32 = if predicate { 1 } else { 0 };
@@ -433,6 +449,12 @@ impl CoalescedGroup {
         result != 0
     }
 
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    pub fn any(&self, _predicate: bool) -> bool {
+        unimplemented!("CoalescedGroup::any requires CUDA target")
+    }
+
     /// Returns true if all threads in the group have `predicate == true`.
     ///
     /// # Example
@@ -449,6 +471,7 @@ impl CoalescedGroup {
     /// }
     /// # }
     /// ```
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     pub fn all(&self, predicate: bool) -> bool {
         let pred_val: u32 = if predicate { 1 } else { 0 };
@@ -470,6 +493,12 @@ impl CoalescedGroup {
         result != 0
     }
 
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    pub fn all(&self, _predicate: bool) -> bool {
+        unimplemented!("CoalescedGroup::all requires CUDA target")
+    }
+
     /// Returns a ballot of predicate values across all threads in the group.
     ///
     /// Bit N in the result is set if the thread with rank N has `predicate == true`.
@@ -487,6 +516,7 @@ impl CoalescedGroup {
     /// // ballot has bits set for threads where condition is true
     /// # }
     /// ```
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     pub fn ballot(&self, predicate: bool) -> u32 {
         let pred_val: u32 = if predicate { 1 } else { 0 };
@@ -506,6 +536,12 @@ impl CoalescedGroup {
         }
         // Mask result to only include threads in this group
         result & self.mask
+    }
+
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    pub fn ballot(&self, _predicate: bool) -> u32 {
+        unimplemented!("CoalescedGroup::ballot requires CUDA target")
     }
 }
 
@@ -581,6 +617,7 @@ impl ThreadGroup for CoalescedGroup {
 /// }
 /// # }
 /// ```
+#[cfg(target_os = "cuda")]
 #[inline(always)]
 pub fn coalesced_threads() -> CoalescedGroup {
     let mask: u32;
@@ -601,6 +638,12 @@ pub fn coalesced_threads() -> CoalescedGroup {
     let size = mask.count_ones();
 
     CoalescedGroup { mask, rank, size }
+}
+
+#[cfg(not(target_os = "cuda"))]
+#[inline(always)]
+pub fn coalesced_threads() -> CoalescedGroup {
+    unimplemented!("coalesced_threads() requires CUDA target")
 }
 
 /// Count how many bits are set in mask below the given position.
@@ -645,6 +688,7 @@ fn count_active_below(mask: u32, position: u32) -> u32 {
 /// assert_eq!(nth_active_lane(mask, 1), 9);  // Second active thread is lane 9
 /// assert_eq!(nth_active_lane(mask, 7), 15); // Eighth active thread is lane 15
 /// ```
+#[cfg(target_os = "cuda")]
 #[inline(always)]
 fn nth_active_lane(mask: u32, n: u32) -> u32 {
     let mut count = 0u32;

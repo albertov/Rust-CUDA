@@ -125,6 +125,7 @@
 //! - **Uniform participation**: All threads in group must call wait operations uniformly
 //! - **Synchronization**: Proper wait/commit_group usage required to avoid race conditions
 
+#[cfg(target_os = "cuda")]
 use core::arch::asm;
 
 /// Trait providing asynchronous memory copy operations for cooperative groups.
@@ -281,6 +282,7 @@ pub trait AsyncMemory {
 
 /// Implementation of async memory operations for ThreadBlock.
 impl<'a> AsyncMemory for crate::cooperative_groups::ThreadBlock<'a> {
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     unsafe fn memcpy_async<T>(&self, dst: *mut T, src: *const T, count: usize) {
         let size_bytes = count * core::mem::size_of::<T>();
@@ -348,6 +350,13 @@ impl<'a> AsyncMemory for crate::cooperative_groups::ThreadBlock<'a> {
         }
     }
 
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    unsafe fn memcpy_async<T>(&self, _dst: *mut T, _src: *const T, _count: usize) {
+        unimplemented!("AsyncMemory::memcpy_async requires CUDA target")
+    }
+
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     fn wait(&self) {
         unsafe {
@@ -358,6 +367,13 @@ impl<'a> AsyncMemory for crate::cooperative_groups::ThreadBlock<'a> {
         }
     }
 
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    fn wait(&self) {
+        unimplemented!("AsyncMemory::wait requires CUDA target")
+    }
+
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     fn wait_prior<const N: u32>(&self) {
         unsafe {
@@ -369,6 +385,13 @@ impl<'a> AsyncMemory for crate::cooperative_groups::ThreadBlock<'a> {
         }
     }
 
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    fn wait_prior<const N: u32>(&self) {
+        unimplemented!("AsyncMemory::wait_prior requires CUDA target")
+    }
+
+    #[cfg(target_os = "cuda")]
     #[inline(always)]
     fn commit_group(&self) {
         unsafe {
@@ -377,5 +400,11 @@ impl<'a> AsyncMemory for crate::cooperative_groups::ThreadBlock<'a> {
                 options(nostack)
             );
         }
+    }
+
+    #[cfg(not(target_os = "cuda"))]
+    #[inline(always)]
+    fn commit_group(&self) {
+        unimplemented!("AsyncMemory::commit_group requires CUDA target")
     }
 }
