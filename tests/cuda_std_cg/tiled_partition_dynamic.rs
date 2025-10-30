@@ -140,7 +140,7 @@ fn test_dynamic_shuffle() -> Result<(), Box<dyn std::error::Error>> {
 
     // Verify shuffle results
     for thread_idx in 0..num_threads as usize {
-        let rank = (thread_idx % tile_size as usize) as i32;
+        let _rank = (thread_idx % tile_size as usize) as i32;
         let shfl_result = results_host[thread_idx * 4];
         let shfl_down_result = results_host[thread_idx * 4 + 1];
         let shfl_up_result = results_host[thread_idx * 4 + 2];
