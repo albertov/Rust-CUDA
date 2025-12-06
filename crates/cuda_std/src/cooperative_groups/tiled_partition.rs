@@ -503,6 +503,7 @@ impl<const SIZE: u32> TiledGroup<SIZE> {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = src_lane;
                 result = var;
             }
         }
@@ -582,6 +583,7 @@ impl<const SIZE: u32> TiledGroup<SIZE> {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = delta;
                 result = var;
             }
         }
@@ -656,6 +658,7 @@ impl<const SIZE: u32> TiledGroup<SIZE> {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = delta;
                 result = var;
             }
         }
@@ -738,6 +741,7 @@ impl<const SIZE: u32> TiledGroup<SIZE> {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = lane_mask;
                 result = var;
             }
         }
@@ -1312,6 +1316,7 @@ impl<const SIZE: u32> TiledGroup<SIZE> {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = value;
                 // Fallback: only this thread matches
                 result = 1u32 << self.rank;
             }
@@ -1444,6 +1449,7 @@ impl<const SIZE: u32> TiledGroup<SIZE> {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = value;
                 // Fallback: only this thread matches, not unanimous
                 mask = 1u32 << self.rank;
                 all_match = 0;
@@ -1679,6 +1685,7 @@ impl DynamicTiledGroup {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = src_lane;
                 result = var;
             }
         }
@@ -1713,6 +1720,7 @@ impl DynamicTiledGroup {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = delta;
                 result = var;
             }
         }
@@ -1743,6 +1751,7 @@ impl DynamicTiledGroup {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = delta;
                 result = var;
             }
         }
@@ -1777,6 +1786,7 @@ impl DynamicTiledGroup {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = lane_mask;
                 result = var;
             }
         }
@@ -1918,6 +1928,7 @@ impl DynamicTiledGroup {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = value;
                 result = 1u32 << self.rank;
             }
         }
@@ -1955,6 +1966,7 @@ impl DynamicTiledGroup {
 
             #[cfg(not(target_os = "cuda"))]
             {
+                let _ = value;
                 mask = 1u32 << self.rank;
                 all_match = 0;
             }
