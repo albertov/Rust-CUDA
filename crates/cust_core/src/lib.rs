@@ -206,4 +206,14 @@ pub mod _hidden {
     impl_device_copy_generic! {
         num_complex::Complex
     }
+
+    // uom Quantity is #[repr(transparent)] over V, so DeviceCopy is safe when V: DeviceCopy
+    #[cfg(feature = "uom")]
+    unsafe impl<D, U, V> DeviceCopy for uom::si::Quantity<D, U, V>
+    where
+        D: uom::si::Dimension + ?Sized,
+        U: uom::si::Units<V> + ?Sized,
+        V: uom::num::Num + uom::Conversion<V> + Copy + DeviceCopy,
+    {
+    }
 }

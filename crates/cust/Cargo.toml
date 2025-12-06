@@ -30,6 +30,7 @@ impl_mint = ["cust_core/mint", "mint"]
 impl_vek = ["cust_core/vek", "vek"]
 impl_half = ["cust_core/half"]
 impl_num_complex = ["cust_core/num-complex", "num-complex"]
+impl_uom = ["cust_core/uom"]
 
 [build-dependencies]
 serde_json = "1.0.140"
