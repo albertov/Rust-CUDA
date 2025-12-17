@@ -100,7 +100,11 @@ fn main() {
         }
         println!("cargo::rustc-link-lib=dylib=nvvm");
         // Handle libdevice support.
-        fs::copy(sdk.libdevice_bitcode_path(), outdir.join("libdevice.bc"))
+        let libdevice_dest = outdir.join("libdevice.bc");
+        // Remove existing file if present to avoid permission issues on rebuild
+        // (nix store files have read-only permissions that persist on the destination)
+        let _ = fs::remove_file(&libdevice_dest);
+        fs::copy(sdk.libdevice_bitcode_path(), &libdevice_dest)
             .expect("Cannot copy libdevice bitcode file.");
     }
 }
