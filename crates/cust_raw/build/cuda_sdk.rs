@@ -282,11 +282,8 @@ impl CudaSdk {
     }
 
     fn follow_symlink(p: &path::Path) -> Result<path::PathBuf, Box<dyn error::Error>> {
-        let mut p = p.to_path_buf();
-        while p.is_symlink() {
-            p = p.read_link()?;
-        }
-        Ok(p)
+        // Use canonicalize to properly resolve symlinks (including relative ones)
+        Ok(fs::canonicalize(p)?)
     }
 
     fn path_dedup(paths: Vec<path::PathBuf>) -> Vec<path::PathBuf> {

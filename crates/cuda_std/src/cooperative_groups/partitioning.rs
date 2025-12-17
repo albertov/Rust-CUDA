@@ -268,10 +268,10 @@ pub fn binary_partition<G: ThreadGroup>(parent: &G, predicate: bool) -> Coalesce
 #[gpu_only]
 #[inline(always)]
 unsafe fn match_any_32(mask: u32, value: u32) -> u32 {
-    extern "C" {
+    unsafe extern "C" {
         #[link_name = "llvm.nvvm.match.any.sync.i32"]
         fn __nvvm_warp_match_any_32(mask: u32, value: u32) -> u32;
     }
-    __nvvm_warp_match_any_32(mask, value)
+    unsafe { __nvvm_warp_match_any_32(mask, value) }
 }
 
