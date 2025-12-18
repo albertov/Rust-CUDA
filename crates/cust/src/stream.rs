@@ -306,19 +306,21 @@ impl Stream {
         let grid_size: GridSize = grid_size.into();
         let block_size: BlockSize = block_size.into();
 
-        driver_sys::cuLaunchCooperativeKernel(
-            func.to_raw(),
-            grid_size.x,
-            grid_size.y,
-            grid_size.z,
-            block_size.x,
-            block_size.y,
-            block_size.z,
-            shared_mem_bytes,
-            self.inner,
-            args.as_ptr() as *mut _,
-        )
-        .to_result()
+        unsafe {
+          driver_sys::cuLaunchCooperativeKernel(
+              func.to_raw(),
+              grid_size.x,
+              grid_size.y,
+              grid_size.z,
+              block_size.x,
+              block_size.y,
+              block_size.z,
+              shared_mem_bytes,
+              self.inner,
+              args.as_ptr() as *mut _,
+          )
+          .to_result()
+        }
     }
 
     // Get the inner `CUstream` from the `Stream`. If you use this handle elsewhere,
